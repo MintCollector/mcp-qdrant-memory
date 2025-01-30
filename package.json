@@ -1,0 +1,35 @@
+{
+  "name": "@reprally/mcp-qdrant-memory",
+  "version": "0.1.0",
+  "description": "MCP server for enabling memory for Claude through a knowledge graph with Qdrant persistence",
+  "license": "MIT",
+  "author": "Jarad DeLorenzo",
+  "homepage": "https://github.com/reprally/mcp-qdrant-memory",
+  "bugs": "https://github.com//reprally/mcp-qdrant-memory/issues",
+  "type": "module",
+  "bin": {
+    "mcp-server-memory": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && shx chmod +x dist/*.js",
+    "prepare": "npm run build",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.0.1",
+    "@qdrant/js-client-rest": "^1.7.0",
+    "openai": "^4.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "shx": "^0.3.4",
+    "typescript": "^5.6.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://npm.pkg.github.com"
+  }
+}
