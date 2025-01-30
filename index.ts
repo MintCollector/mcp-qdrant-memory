@@ -38,10 +38,23 @@ class KnowledgeGraphManager {
   async initialize(): Promise<void> {
     try {
       const data = await fs.readFile(MEMORY_FILE_PATH, 'utf-8');
-      this.graph = JSON.parse(data);
-    } catch {
-      // If file doesn't exist, use empty graph
-      this.graph = { entities: [], relations: [] };
+      const parsedData = JSON.parse(data);
+      // Ensure entities have observations array
+      this.graph = {
+        entities: parsedData.entities.map((e: Entity) => ({
+          ...e,
+          observations: e.observations || []
+        })),
+        relations: parsedData.relations || []
+      };
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        // If file doesn't exist, use empty graph
+        this.graph = { entities: [], relations: [] };
+      } else {
+        // Re-throw unexpected errors
+        throw new Error(`Failed to initialize graph: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     await this.qdrant.initialize();
   }
@@ -136,8 +149,17 @@ class KnowledgeGraphManager {
   }
 
   async searchSimilar(query: string, limit: number = 10): Promise<Array<Entity | Relation>> {
-    return await this.qdrant.searchSimilar(query, limit);
+    // Ensure limit is a positive number
+    const validLimit = Math.max(1, Math.min(limit, 100)); // Cap at 100 results
+    return await this.qdrant.searchSimilar(query, validLimit);
   }
+}
+
+interface CallToolRequest {
+  params: {
+    name: string;
+    arguments?: Record<string, unknown>;
+  };
 }
 
 class MemoryServer {
@@ -321,7 +343,7 @@ class MemoryServer {
       ],
     }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
       if (!request.params.arguments) {
         throw new McpError(
           ErrorCode.InvalidParams,

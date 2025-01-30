@@ -1,6 +1,6 @@
 {
   "name": "@reprally/mcp-qdrant-memory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for enabling memory for Claude through a knowledge graph with Qdrant persistence",
   "license": "MIT",
   "author": "Jarad DeLorenzo",
