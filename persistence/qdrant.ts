@@ -112,7 +112,6 @@ export class QdrantPersistence {
       throw new Error('QDRANT_URL must start with http:// or https://');
     }
     
-    console.log('Initializing QdrantClient with URL:', QDRANT_URL);
     
     this.client = new QdrantClient({ 
       url: QDRANT_URL,
@@ -129,7 +128,6 @@ export class QdrantPersistence {
   async connect(): Promise<void> {
     if (this.initialized) return;
 
-    console.log('Attempting to connect to Qdrant server...');
 
     // Add retry logic for initial connection with exponential backoff
     let retries = 3;
@@ -137,9 +135,7 @@ export class QdrantPersistence {
     
     while (retries > 0) {
       try {
-        console.log(`Connection attempt ${4 - retries}/3...`);
         const collections = await this.client.getCollections();
-        console.log('Successfully connected. Available collections:', collections);
         this.initialized = true;
         break;
       } catch (error: unknown) {
@@ -151,7 +147,6 @@ export class QdrantPersistence {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           throw new Error(`Failed to connect to Qdrant after 3 attempts: ${errorMessage}`);
         }
-        console.log(`Retrying in ${delay/1000} seconds... (${retries} attempts remaining)`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay *= 2; // Exponential backoff
       }
@@ -162,11 +157,8 @@ export class QdrantPersistence {
     await this.connect();
 
     try {
-      console.log(`Checking if collection ${COLLECTION_NAME} exists...`);
       await this.client.getCollection(COLLECTION_NAME);
-      console.log(`Collection ${COLLECTION_NAME} found.`);
     } catch {
-      console.log(`Collection ${COLLECTION_NAME} not found, creating...`);
       // Collection doesn't exist, create it
       try {
         await this.client.createCollection(COLLECTION_NAME, {
@@ -175,7 +167,6 @@ export class QdrantPersistence {
             distance: 'Cosine'
           }
         });
-        console.log(`Collection ${COLLECTION_NAME} created successfully.`);
       } catch (error) {
         console.error('Error creating collection:', error);
         throw error;

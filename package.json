@@ -1,11 +1,11 @@
 {
-  "name": "@reprally/mcp-qdrant-memory",
-  "version": "0.1.1",
-  "description": "MCP server for enabling memory for Claude through a knowledge graph with Qdrant persistence",
+  "name": "@delorenj/mcp-qdrant-memory",
+  "version": "0.1.2",
+  "description": "MCP server for enabling the named memory graphs to be persisted to a qdrant instance.",
   "license": "MIT",
   "author": "Jarad DeLorenzo",
-  "homepage": "https://github.com/reprally/mcp-qdrant-memory",
-  "bugs": "https://github.com//reprally/mcp-qdrant-memory/issues",
+  "homepage": "https://github.com/delorenj/mcp-qdrant-memory",
+  "bugs": "https://github.com//delorenj/mcp-qdrant-memory/issues",
   "type": "module",
   "bin": {
     "mcp-server-memory": "dist/index.js"
@@ -29,7 +29,6 @@
     "typescript": "^5.6.2"
   },
   "publishConfig": {
-    "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   }
 }
