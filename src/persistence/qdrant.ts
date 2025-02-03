@@ -45,7 +45,7 @@ async function customFetch(url: string, options: RequestInit = {}) {
 
     const req = protocol.request(requestOptions, (res) => {
       const chunks: Buffer[] = [];
-      res.on('data', chunk => chunks.push(chunk));
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => {
         const body = Buffer.concat(chunks).toString();
         const response = {
@@ -101,17 +101,21 @@ interface RelationPayload extends Relation {
   type: 'relation';
 }
 
-function isEntity(payload: EntityPayload | RelationPayload): payload is EntityPayload {
+type Payload = EntityPayload | RelationPayload;
+
+function isEntity(payload: Payload): payload is EntityPayload {
   return (
+    payload.type === 'entity' &&
     typeof payload.name === 'string' &&
     typeof payload.entityType === 'string' &&
     Array.isArray(payload.observations) &&
-    payload.observations.every(obs => typeof obs === 'string')
+    payload.observations.every((obs: unknown) => typeof obs === 'string')
   );
 }
 
-function isRelation(payload: EntityPayload | RelationPayload): payload is RelationPayload {
+function isRelation(payload: Payload): payload is RelationPayload {
   return (
+    payload.type === 'relation' &&
     typeof payload.from === 'string' &&
     typeof payload.to === 'string' &&
     typeof payload.relationType === 'string'
@@ -124,6 +128,10 @@ export class QdrantPersistence {
   private initialized: boolean = false;
 
   constructor() {
+    if (!QDRANT_URL) {
+      throw new Error('QDRANT_URL environment variable is required');
+    }
+
     // Validate QDRANT_URL format and protocol
     if (!QDRANT_URL.startsWith('http://') && !QDRANT_URL.startsWith('https://')) {
       throw new Error('QDRANT_URL must start with http:// or https://');
@@ -171,6 +179,10 @@ export class QdrantPersistence {
   async initialize() {
     await this.connect();
 
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     try {
       await this.client.getCollection(COLLECTION_NAME);
     } catch {
@@ -207,11 +219,15 @@ export class QdrantPersistence {
 
   async persistEntity(entity: Entity) {
     await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     const text = `${entity.name} (${entity.entityType}): ${entity.observations.join('. ')}`;
     const vector = await this.generateEmbedding(text);
     const id = await this.hashString(entity.name);
 
-    const payload: EntityPayload = {
+    const payload = {
       type: 'entity' as const,
       ...entity
     };
@@ -220,18 +236,22 @@ export class QdrantPersistence {
       points: [{
         id,
         vector,
-        payload
+        payload: payload as Record<string, unknown>
       }]
     });
   }
 
   async persistRelation(relation: Relation) {
     await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     const text = `${relation.from} ${relation.relationType} ${relation.to}`;
     const vector = await this.generateEmbedding(text);
     const id = await this.hashString(`${relation.from}-${relation.relationType}-${relation.to}`);
 
-    const payload: RelationPayload = {
+    const payload = {
       type: 'relation' as const,
       ...relation
     };
@@ -240,13 +260,17 @@ export class QdrantPersistence {
       points: [{
         id,
         vector,
-        payload
+        payload: payload as Record<string, unknown>
       }]
     });
   }
 
   async searchSimilar(query: string, limit: number = 10) {
     await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     const queryVector = await this.generateEmbedding(query);
 
     const results = await this.client.search(COLLECTION_NAME, {
@@ -258,14 +282,16 @@ export class QdrantPersistence {
     const validResults: Array<Entity | Relation> = [];
 
     for (const result of results) {
-      const payload = result.payload as EntityPayload | RelationPayload;
+      if (!result.payload) continue;
 
-      if (payload.type === 'entity' && isEntity(payload)) {
+      const payload = result.payload as unknown as Payload;
+
+      if (isEntity(payload)) {
         const { type, ...entity } = payload;
-        validResults.push(entity as Entity);
-      } else if (payload.type === 'relation' && isRelation(payload)) {
+        validResults.push(entity);
+      } else if (isRelation(payload)) {
         const { type, ...relation } = payload;
-        validResults.push(relation as Relation);
+        validResults.push(relation);
       }
     }
 
@@ -274,6 +300,10 @@ export class QdrantPersistence {
 
   async deleteEntity(entityName: string) {
     await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     const id = await this.hashString(entityName);
     await this.client.delete(COLLECTION_NAME, {
       points: [id]
@@ -282,6 +312,10 @@ export class QdrantPersistence {
 
   async deleteRelation(relation: Relation) {
     await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error('COLLECTION_NAME environment variable is required');
+    }
+
     const id = await this.hashString(`${relation.from}-${relation.relationType}-${relation.to}`);
     await this.client.delete(COLLECTION_NAME, {
       points: [id]
