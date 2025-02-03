@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import https from 'https';
 import http from 'http';
 import { QDRANT_URL, COLLECTION_NAME, OPENAI_API_KEY, QDRANT_API_KEY } from '../config.js';
+import { Entity, Relation } from '../types.js';
 
 // Custom fetch implementation using Node's HTTP/HTTPS modules
 async function customFetch(url: string, options: RequestInit = {}) {
@@ -79,18 +80,6 @@ async function customFetch(url: string, options: RequestInit = {}) {
 // Override global fetch for the Qdrant client
 if (typeof globalThis !== 'undefined') {
   (globalThis as any).fetch = customFetch;
-}
-
-interface Entity {
-  name: string;
-  entityType: string;
-  observations: string[];
-}
-
-interface Relation {
-  from: string;
-  to: string;
-  relationType: string;
 }
 
 interface EntityPayload extends Entity {

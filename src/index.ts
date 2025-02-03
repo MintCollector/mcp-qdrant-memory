@@ -47,7 +47,7 @@ class KnowledgeGraphManager {
         })),
         relations: parsedData.relations || []
       };
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
         // If file doesn't exist, use empty graph
         this.graph = { entities: [], relations: [] };
@@ -65,7 +65,7 @@ class KnowledgeGraphManager {
 
   async addEntities(entities: Entity[]): Promise<void> {
     for (const entity of entities) {
-      const existingIndex = this.graph.entities.findIndex(e => e.name === entity.name);
+      const existingIndex = this.graph.entities.findIndex((e: Entity) => e.name === entity.name);
       if (existingIndex !== -1) {
         this.graph.entities[existingIndex] = entity;
       } else {
@@ -85,7 +85,7 @@ class KnowledgeGraphManager {
         throw new Error(`Entity not found: ${relation.to}`);
       }
       const existingIndex = this.graph.relations.findIndex(
-        r => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
+        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
       );
       if (existingIndex !== -1) {
         this.graph.relations[existingIndex] = relation;
@@ -98,7 +98,7 @@ class KnowledgeGraphManager {
   }
 
   async addObservations(entityName: string, observations: string[]): Promise<void> {
-    const entity = this.graph.entities.find(e => e.name === entityName);
+    const entity = this.graph.entities.find((e: Entity) => e.name === entityName);
     if (!entity) {
       throw new Error(`Entity not found: ${entityName}`);
     }
@@ -109,11 +109,11 @@ class KnowledgeGraphManager {
 
   async deleteEntities(entityNames: string[]): Promise<void> {
     for (const name of entityNames) {
-      const index = this.graph.entities.findIndex(e => e.name === name);
+      const index = this.graph.entities.findIndex((e: Entity) => e.name === name);
       if (index !== -1) {
         this.graph.entities.splice(index, 1);
         this.graph.relations = this.graph.relations.filter(
-          r => r.from !== name && r.to !== name
+          (r: Relation) => r.from !== name && r.to !== name
         );
         await this.qdrant.deleteEntity(name);
       }
@@ -122,11 +122,11 @@ class KnowledgeGraphManager {
   }
 
   async deleteObservations(entityName: string, observations: string[]): Promise<void> {
-    const entity = this.graph.entities.find(e => e.name === entityName);
+    const entity = this.graph.entities.find((e: Entity) => e.name === entityName);
     if (!entity) {
       throw new Error(`Entity not found: ${entityName}`);
     }
-    entity.observations = entity.observations.filter(o => !observations.includes(o));
+    entity.observations = entity.observations.filter((o: string) => !observations.includes(o));
     await this.qdrant.persistEntity(entity);
     await this.save();
   }
@@ -134,7 +134,7 @@ class KnowledgeGraphManager {
   async deleteRelations(relations: Relation[]): Promise<void> {
     for (const relation of relations) {
       const index = this.graph.relations.findIndex(
-        r => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
+        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
       );
       if (index !== -1) {
         this.graph.relations.splice(index, 1);
