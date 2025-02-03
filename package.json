@@ -1,6 +1,6 @@
 {
   "name": "@delorenj/mcp-qdrant-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "MCP server for enabling the named memory graphs to be persisted to a qdrant instance.",
   "license": "MIT",
   "author": "Jarad DeLorenzo",
@@ -8,7 +8,7 @@
   "bugs": "https://github.com//delorenj/mcp-qdrant-memory/issues",
   "type": "module",
   "bin": {
-    "mcp-server-memory": "dist/index.js"
+    "mcp-qdrant-memory": "dist/index.js"
   },
   "files": [
     "dist"
