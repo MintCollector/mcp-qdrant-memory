@@ -2,6 +2,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import OpenAI from 'openai';
 import https from 'https';
 import http from 'http';
+import crypto from 'crypto';  // Import Node's native crypto module
 import { QDRANT_URL, COLLECTION_NAME, OPENAI_API_KEY, QDRANT_API_KEY } from '../config.js';
 import { Entity, Relation } from '../types.js';
 
@@ -199,11 +200,12 @@ export class QdrantPersistence {
   }
 
   private async hashString(str: string) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(str);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return new DataView(new Uint8Array(hashArray.slice(0, 4)).buffer).getUint32(0);
+    // Use Node's native crypto module
+    const hash = crypto.createHash('sha256');
+    hash.update(str);
+    const buffer = hash.digest();
+    // Take first 4 bytes and convert to number
+    return buffer.readUInt32BE(0);
   }
 
   async persistEntity(entity: Entity) {
