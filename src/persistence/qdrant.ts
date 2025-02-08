@@ -1,18 +1,23 @@
-import { QdrantClient } from '@qdrant/js-client-rest';
-import OpenAI from 'openai';
-import https from 'https';
-import http from 'http';
-import crypto from 'crypto';  // Import Node's native crypto module
-import { QDRANT_URL, COLLECTION_NAME, OPENAI_API_KEY, QDRANT_API_KEY } from '../config.js';
-import { Entity, Relation } from '../types.js';
+import { QdrantClient } from "@qdrant/js-client-rest";
+import OpenAI from "openai";
+import https from "https";
+import http from "http";
+import crypto from "crypto"; // Import Node's native crypto module
+import {
+  QDRANT_URL,
+  COLLECTION_NAME,
+  OPENAI_API_KEY,
+  QDRANT_API_KEY
+} from "../config.js";
+import { Entity, Relation } from "../types.js";
 
 // Custom fetch implementation using Node's HTTP/HTTPS modules
 async function customFetch(url: string, options: RequestInit = {}) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const headers: { [key: string]: string } = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
+      Accept: "application/json",
+      "Content-Type": "application/json"
     };
 
     if (options.headers) {
@@ -22,17 +27,17 @@ async function customFetch(url: string, options: RequestInit = {}) {
     }
 
     const requestOptions: http.RequestOptions = {
-      method: options.method || 'GET',
+      method: options.method || "GET",
       hostname: urlObj.hostname,
-      port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+      port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
       path: `${urlObj.pathname}${urlObj.search}`,
       headers,
       timeout: 60000
     };
 
     // Choose http or https module based on protocol
-    const protocol = urlObj.protocol === 'https:' ? https : http;
-    if (urlObj.protocol === 'https:') {
+    const protocol = urlObj.protocol === "https:" ? https : http;
+    if (urlObj.protocol === "https:") {
       requestOptions.agent = new https.Agent({
         rejectUnauthorized: false,
         keepAlive: true,
@@ -47,17 +52,20 @@ async function customFetch(url: string, options: RequestInit = {}) {
 
     const req = protocol.request(requestOptions, (res) => {
       const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
-      res.on('end', () => {
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
         const body = Buffer.concat(chunks).toString();
         const response = {
           ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode || 500,
-          statusText: res.statusMessage || '',
-          headers: new Headers(Object.entries(res.headers).reduce((acc, [key, value]) => {
-            if (key && value) acc[key] = Array.isArray(value) ? value.join(', ') : value;
-            return acc;
-          }, {} as { [key: string]: string })),
+          statusText: res.statusMessage || "",
+          headers: new Headers(
+            Object.entries(res.headers).reduce((acc, [key, value]) => {
+              if (key && value)
+                acc[key] = Array.isArray(value) ? value.join(", ") : value;
+              return acc;
+            }, {} as { [key: string]: string })
+          ),
           json: async () => JSON.parse(body),
           text: async () => body
         } as Response;
@@ -65,50 +73,54 @@ async function customFetch(url: string, options: RequestInit = {}) {
       });
     });
 
-    req.on('error', reject);
-    req.on('timeout', () => {
+    req.on("error", reject);
+    req.on("timeout", () => {
       req.destroy();
-      reject(new Error('Request timed out'));
+      reject(new Error("Request timed out"));
     });
 
     if (options.body) {
-      req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+      req.write(
+        typeof options.body === "string"
+          ? options.body
+          : JSON.stringify(options.body)
+      );
     }
     req.end();
   });
 }
 
 // Override global fetch for the Qdrant client
-if (typeof globalThis !== 'undefined') {
+if (typeof globalThis !== "undefined") {
   (globalThis as any).fetch = customFetch;
 }
 
 interface EntityPayload extends Entity {
-  type: 'entity';
+  type: "entity";
 }
 
 interface RelationPayload extends Relation {
-  type: 'relation';
+  type: "relation";
 }
 
 type Payload = EntityPayload | RelationPayload;
 
 function isEntity(payload: Payload): payload is EntityPayload {
   return (
-    payload.type === 'entity' &&
-    typeof payload.name === 'string' &&
-    typeof payload.entityType === 'string' &&
+    payload.type === "entity" &&
+    typeof payload.name === "string" &&
+    typeof payload.entityType === "string" &&
     Array.isArray(payload.observations) &&
-    payload.observations.every((obs: unknown) => typeof obs === 'string')
+    payload.observations.every((obs: unknown) => typeof obs === "string")
   );
 }
 
 function isRelation(payload: Payload): payload is RelationPayload {
   return (
-    payload.type === 'relation' &&
-    typeof payload.from === 'string' &&
-    typeof payload.to === 'string' &&
-    typeof payload.relationType === 'string'
+    payload.type === "relation" &&
+    typeof payload.from === "string" &&
+    typeof payload.to === "string" &&
+    typeof payload.relationType === "string"
   );
 }
 
@@ -119,12 +131,15 @@ export class QdrantPersistence {
 
   constructor() {
     if (!QDRANT_URL) {
-      throw new Error('QDRANT_URL environment variable is required');
+      throw new Error("QDRANT_URL environment variable is required");
     }
 
     // Validate QDRANT_URL format and protocol
-    if (!QDRANT_URL.startsWith('http://') && !QDRANT_URL.startsWith('https://')) {
-      throw new Error('QDRANT_URL must start with http:// or https://');
+    if (
+      !QDRANT_URL.startsWith("http://") &&
+      !QDRANT_URL.startsWith("https://")
+    ) {
+      throw new Error("QDRANT_URL must start with http:// or https://");
     }
 
     this.client = new QdrantClient({
@@ -134,7 +149,7 @@ export class QdrantPersistence {
     });
 
     this.openai = new OpenAI({
-      apiKey: OPENAI_API_KEY,
+      apiKey: OPENAI_API_KEY
     });
   }
 
@@ -147,20 +162,25 @@ export class QdrantPersistence {
 
     while (retries > 0) {
       try {
-        const collections = await this.client.getCollections();
-        console.log('Connected to Qdrant successfully:', collections);
+        await this.client.getCollections();
         this.initialized = true;
         break;
       } catch (error: unknown) {
-        console.error('Connection attempt failed:', error instanceof Error ? error.message : error);
-        console.error('Full error:', error);
+        console.error(
+          "Connection attempt failed:",
+          error instanceof Error ? error.message : error
+        );
+        console.error("Full error:", error);
 
         retries--;
         if (retries === 0) {
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          throw new Error(`Failed to connect to Qdrant after 3 attempts: ${errorMessage}`);
+          const errorMessage =
+            error instanceof Error ? error.message : "Unknown error";
+          throw new Error(
+            `Failed to connect to Qdrant after 3 attempts: ${errorMessage}`
+          );
         }
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2; // Exponential backoff
       }
     }
@@ -170,7 +190,7 @@ export class QdrantPersistence {
     await this.connect();
 
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
     try {
@@ -181,11 +201,11 @@ export class QdrantPersistence {
         await this.client.createCollection(COLLECTION_NAME, {
           vectors: {
             size: 1536, // OpenAI embedding dimension
-            distance: 'Cosine'
+            distance: "Cosine"
           }
         });
       } catch (error) {
-        console.error('Error creating collection:', error);
+        console.error("Error creating collection:", error);
         throw error;
       }
     }
@@ -193,7 +213,7 @@ export class QdrantPersistence {
 
   private async generateEmbedding(text: string) {
     const response = await this.openai.embeddings.create({
-      model: 'text-embedding-ada-002',
+      model: "text-embedding-ada-002",
       input: text
     });
     return response.data[0].embedding;
@@ -201,7 +221,7 @@ export class QdrantPersistence {
 
   private async hashString(str: string) {
     // Use Node's native crypto module
-    const hash = crypto.createHash('sha256');
+    const hash = crypto.createHash("sha256");
     hash.update(str);
     const buffer = hash.digest();
     // Take first 4 bytes and convert to number
@@ -211,55 +231,63 @@ export class QdrantPersistence {
   async persistEntity(entity: Entity) {
     await this.connect();
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
-    const text = `${entity.name} (${entity.entityType}): ${entity.observations.join('. ')}`;
+    const text = `${entity.name} (${
+      entity.entityType
+    }): ${entity.observations.join(". ")}`;
     const vector = await this.generateEmbedding(text);
     const id = await this.hashString(entity.name);
 
     const payload = {
-      type: 'entity' as const,
+      type: "entity" as const,
       ...entity
     };
 
     await this.client.upsert(COLLECTION_NAME, {
-      points: [{
-        id,
-        vector,
-        payload: payload as Record<string, unknown>
-      }]
+      points: [
+        {
+          id,
+          vector,
+          payload: payload as Record<string, unknown>
+        }
+      ]
     });
   }
 
   async persistRelation(relation: Relation) {
     await this.connect();
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
     const text = `${relation.from} ${relation.relationType} ${relation.to}`;
     const vector = await this.generateEmbedding(text);
-    const id = await this.hashString(`${relation.from}-${relation.relationType}-${relation.to}`);
+    const id = await this.hashString(
+      `${relation.from}-${relation.relationType}-${relation.to}`
+    );
 
     const payload = {
-      type: 'relation' as const,
+      type: "relation" as const,
       ...relation
     };
 
     await this.client.upsert(COLLECTION_NAME, {
-      points: [{
-        id,
-        vector,
-        payload: payload as Record<string, unknown>
-      }]
+      points: [
+        {
+          id,
+          vector,
+          payload: payload as Record<string, unknown>
+        }
+      ]
     });
   }
 
   async searchSimilar(query: string, limit: number = 10) {
     await this.connect();
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
     const queryVector = await this.generateEmbedding(query);
@@ -292,7 +320,7 @@ export class QdrantPersistence {
   async deleteEntity(entityName: string) {
     await this.connect();
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
     const id = await this.hashString(entityName);
@@ -304,10 +332,12 @@ export class QdrantPersistence {
   async deleteRelation(relation: Relation) {
     await this.connect();
     if (!COLLECTION_NAME) {
-      throw new Error('COLLECTION_NAME environment variable is required');
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
-    const id = await this.hashString(`${relation.from}-${relation.relationType}-${relation.to}`);
+    const id = await this.hashString(
+      `${relation.from}-${relation.relationType}-${relation.to}`
+    );
     await this.client.delete(COLLECTION_NAME, {
       points: [id]
     });
