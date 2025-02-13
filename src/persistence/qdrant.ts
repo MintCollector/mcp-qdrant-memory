@@ -1,8 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
-import https from "https";
-import http from "http";
-import crypto from "crypto"; // Import Node's native crypto module
+import crypto from "crypto";
 import {
   QDRANT_URL,
   COLLECTION_NAME,
@@ -11,92 +9,21 @@ import {
 } from "../config.js";
 import { Entity, Relation } from "../types.js";
 
-// Custom fetch implementation using Node's HTTP/HTTPS modules
-async function customFetch(url: string, options: RequestInit = {}) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const headers: { [key: string]: string } = {
-      Accept: "application/json",
-      "Content-Type": "application/json"
-    };
-
-    if (options.headers) {
-      Object.entries(options.headers).forEach(([key, value]) => {
-        if (value) headers[key] = value.toString();
-      });
-    }
-
-    const requestOptions: http.RequestOptions = {
-      method: options.method || "GET",
-      hostname: urlObj.hostname,
-      port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
-      path: `${urlObj.pathname}${urlObj.search}`,
-      headers,
-      timeout: 60000
-    };
-
-    // Choose http or https module based on protocol
-    const protocol = urlObj.protocol === "https:" ? https : http;
-    if (urlObj.protocol === "https:") {
-      requestOptions.agent = new https.Agent({
-        rejectUnauthorized: false,
-        keepAlive: true,
-        timeout: 60000
-      });
-    } else {
-      requestOptions.agent = new http.Agent({
-        keepAlive: true,
-        timeout: 60000
-      });
-    }
-
-    const req = protocol.request(requestOptions, (res) => {
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => {
-        const body = Buffer.concat(chunks).toString();
-        const response = {
-          ok: res.statusCode && res.statusCode >= 200 && res.statusCode < 300,
-          status: res.statusCode || 500,
-          statusText: res.statusMessage || "",
-          headers: new Headers(
-            Object.entries(res.headers).reduce((acc, [key, value]) => {
-              if (key && value)
-                acc[key] = Array.isArray(value) ? value.join(", ") : value;
-              return acc;
-            }, {} as { [key: string]: string })
-          ),
-          json: async () => JSON.parse(body),
-          text: async () => body
-        } as Response;
-        resolve(response);
-      });
-    });
-
-    req.on("error", reject);
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("Request timed out"));
-    });
-
-    if (options.body) {
-      req.write(
-        typeof options.body === "string"
-          ? options.body
-          : JSON.stringify(options.body)
-      );
-    }
-    req.end();
-  });
-}
-
-// Override global fetch for the Qdrant client
-if (typeof globalThis !== "undefined") {
-  (globalThis as any).fetch = customFetch;
-}
-
 interface EntityPayload extends Entity {
   type: "entity";
+}
+
+interface QdrantCollectionConfig {
+  params: {
+    vectors: {
+      size: number;
+      distance: string;
+    };
+  };
+}
+
+interface QdrantCollectionInfo {
+  config: QdrantCollectionConfig;
 }
 
 interface RelationPayload extends Relation {
@@ -144,12 +71,15 @@ export class QdrantPersistence {
 
     this.client = new QdrantClient({
       url: QDRANT_URL,
+      apiKey: QDRANT_API_KEY,
       timeout: 60000,
-      apiKey: QDRANT_API_KEY
+      checkCompatibility: false, // Disable version check
     });
 
+    console.log(`QdrantClient configured with URL: ${QDRANT_URL}`);
+
     this.openai = new OpenAI({
-      apiKey: OPENAI_API_KEY
+      apiKey: OPENAI_API_KEY,
     });
   }
 
@@ -162,69 +92,134 @@ export class QdrantPersistence {
 
     while (retries > 0) {
       try {
+        console.log(`Attempting to connect to Qdrant (attempt ${4 - retries}/3)`);
         await this.client.getCollections();
+        console.log('Successfully connected to Qdrant');
         this.initialized = true;
         break;
       } catch (error: unknown) {
-        console.error(
-          "Connection attempt failed:",
-          error instanceof Error ? error.message : error
-        );
+        const message =
+          error instanceof Error ? error.message : "Unknown Qdrant error";
+        console.error(`Connection attempt failed: ${message}`);
         console.error("Full error:", error);
 
         retries--;
         if (retries === 0) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Unknown error";
           throw new Error(
-            `Failed to connect to Qdrant after 3 attempts: ${errorMessage}`
+            `Failed to connect to Qdrant after multiple attempts: ${message}`
           );
         }
+        console.log(`Retrying in ${delay / 1000} seconds...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2; // Exponential backoff
       }
     }
+
+    console.log('Qdrant connection process completed.');
   }
 
-  async initialize() {
-    await this.connect();
+    private async recreateCollection(vectorSize: number) {
+        if (!COLLECTION_NAME) {
+            throw new Error("COLLECTION_NAME environment variable is required in recreateCollection");
+        }
 
-    if (!COLLECTION_NAME) {
-      throw new Error("COLLECTION_NAME environment variable is required");
+        try {
+            console.log(`Deleting collection ${COLLECTION_NAME}...`);
+            await this.client.deleteCollection(COLLECTION_NAME);
+            console.log(`Creating collection ${COLLECTION_NAME} with vector size ${vectorSize}...`);
+            await this.client.createCollection(COLLECTION_NAME, {
+                vectors: {
+                size: vectorSize,
+                distance: 'Cosine',
+                },
+            });
+            console.log(`Collection recreated with new vector size ${vectorSize}`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+            throw new Error(`Failed to recreate collection: ${message}`);
+        }
     }
 
-    try {
-      await this.client.getCollection(COLLECTION_NAME);
-    } catch {
-      // Collection doesn't exist, create it
-      try {
-        await this.client.createCollection(COLLECTION_NAME, {
-          vectors: {
-            size: 1536, // OpenAI embedding dimension
-            distance: "Cosine"
-          }
-        });
-      } catch (error) {
-        console.error("Error creating collection:", error);
-        throw error;
-      }
+    async initialize() {
+        await this.connect();
+
+        if (!COLLECTION_NAME) {
+            throw new Error("COLLECTION_NAME environment variable is required");
+        }
+
+        const requiredVectorSize = 1536; // OpenAI embedding dimension
+
+        try {
+            // Check if collection exists
+            console.log(`Checking if collection ${COLLECTION_NAME} exists...`);
+            const collections = await this.client.getCollections();
+            const collection = collections.collections.find(
+                (c) => c.name === COLLECTION_NAME
+            );
+
+            if (!collection) {
+                console.log(
+                `Creating new collection ${COLLECTION_NAME} with vector size ${requiredVectorSize}`
+                );
+                await this.client.createCollection(COLLECTION_NAME, {
+                vectors: {
+                    size: requiredVectorSize,
+                    distance: "Cosine",
+                },
+                });
+                return;
+            }
+
+            // Get collection info to check vector size
+            console.log(`Retrieving collection info for ${COLLECTION_NAME}...`);
+            const collectionInfo = (await this.client.getCollection(
+                COLLECTION_NAME
+            )) as QdrantCollectionInfo;
+            const currentVectorSize =
+                collectionInfo.config?.params?.vectors?.size;
+
+            if (!currentVectorSize) {
+                console.log(
+                "Could not determine current vector size, recreating collection..."
+                );
+                await this.recreateCollection(requiredVectorSize);
+                return;
+            }
+
+            if (currentVectorSize !== requiredVectorSize) {
+                console.log(
+                `Vector size mismatch: collection=${currentVectorSize}, required=${requiredVectorSize}`
+                );
+                await this.recreateCollection(requiredVectorSize);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown Qdrant error';
+            console.error("Failed to initialize collection:", message);
+            throw new Error(
+                `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
+            );
+        }
     }
-  }
 
   private async generateEmbedding(text: string) {
-    const response = await this.openai.embeddings.create({
-      model: "text-embedding-ada-002",
-      input: text
-    });
-    return response.data[0].embedding;
+    try {
+      const response = await this.openai.embeddings.create({
+        model: "text-embedding-ada-002",
+        input: text,
+      });
+      return response.data[0].embedding;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown OpenAI error";
+      console.error("OpenAI embedding error:", message);
+      throw new Error(`Failed to generate embeddings with OpenAI: ${message}`);
+    }
   }
 
   private async hashString(str: string) {
-    // Use Node's native crypto module
     const hash = crypto.createHash("sha256");
     hash.update(str);
     const buffer = hash.digest();
-    // Take first 4 bytes and convert to number
     return buffer.readUInt32BE(0);
   }
 
@@ -241,8 +236,8 @@ export class QdrantPersistence {
     const id = await this.hashString(entity.name);
 
     const payload = {
-      type: "entity" as const,
-      ...entity
+      type: "entity",
+      ...entity,
     };
 
     await this.client.upsert(COLLECTION_NAME, {
@@ -250,9 +245,9 @@ export class QdrantPersistence {
         {
           id,
           vector,
-          payload: payload as Record<string, unknown>
-        }
-      ]
+          payload: payload as Record<string, unknown>,
+        },
+      ],
     });
   }
 
@@ -269,8 +264,8 @@ export class QdrantPersistence {
     );
 
     const payload = {
-      type: "relation" as const,
-      ...relation
+      type: "relation",
+      ...relation,
     };
 
     await this.client.upsert(COLLECTION_NAME, {
@@ -278,9 +273,9 @@ export class QdrantPersistence {
         {
           id,
           vector,
-          payload: payload as Record<string, unknown>
-        }
-      ]
+          payload: payload as Record<string, unknown>,
+        },
+      ],
     });
   }
 
@@ -295,7 +290,7 @@ export class QdrantPersistence {
     const results = await this.client.search(COLLECTION_NAME, {
       vector: queryVector,
       limit,
-      with_payload: true
+      with_payload: true,
     });
 
     const validResults: Array<Entity | Relation> = [];
@@ -325,7 +320,7 @@ export class QdrantPersistence {
 
     const id = await this.hashString(entityName);
     await this.client.delete(COLLECTION_NAME, {
-      points: [id]
+      points: [id],
     });
   }
 
@@ -339,7 +334,7 @@ export class QdrantPersistence {
       `${relation.from}-${relation.relationType}-${relation.to}`
     );
     await this.client.delete(COLLECTION_NAME, {
-      points: [id]
+      points: [id],
     });
   }
 }
