@@ -449,12 +449,21 @@ class MemoryServer {
   }
 
   async run() {
-    await this.graphManager.initialize();
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error("Memory MCP server running on stdio");
+    try {
+      await this.graphManager.initialize();
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      console.error("Memory MCP server running on stdio");
+    } catch (error) {
+      console.error("Fatal error running server:", error);
+      process.exit(1);
+    }
   }
 }
 
+// Server startup
 const server = new MemoryServer();
-server.run().catch(console.error);
+server.run().catch((error) => {
+  console.error("Fatal error running server:", error);
+  process.exit(1);
+});
