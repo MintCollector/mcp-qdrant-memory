@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 // Check for required environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 if (!OPENAI_API_KEY) {
