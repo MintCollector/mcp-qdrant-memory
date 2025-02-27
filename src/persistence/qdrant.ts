@@ -76,8 +76,6 @@ export class QdrantPersistence {
       checkCompatibility: false, // Disable version check
     });
 
-    console.log(`QdrantClient configured with URL: ${QDRANT_URL}`);
-
     this.openai = new OpenAI({
       apiKey: OPENAI_API_KEY,
     });
@@ -92,9 +90,7 @@ export class QdrantPersistence {
 
     while (retries > 0) {
       try {
-        console.log(`Attempting to connect to Qdrant (attempt ${4 - retries}/3)`);
         await this.client.getCollections();
-        console.log('Successfully connected to Qdrant');
         this.initialized = true;
         break;
       } catch (error: unknown) {
@@ -109,13 +105,11 @@ export class QdrantPersistence {
             `Failed to connect to Qdrant after multiple attempts: ${message}`
           );
         }
-        console.log(`Retrying in ${delay / 1000} seconds...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         delay *= 2; // Exponential backoff
       }
     }
 
-    console.log('Qdrant connection process completed.');
   }
 
     private async recreateCollection(vectorSize: number) {
@@ -124,16 +118,13 @@ export class QdrantPersistence {
         }
 
         try {
-            console.log(`Deleting collection ${COLLECTION_NAME}...`);
             await this.client.deleteCollection(COLLECTION_NAME);
-            console.log(`Creating collection ${COLLECTION_NAME} with vector size ${vectorSize}...`);
             await this.client.createCollection(COLLECTION_NAME, {
                 vectors: {
                 size: vectorSize,
                 distance: 'Cosine',
                 },
             });
-            console.log(`Collection recreated with new vector size ${vectorSize}`);
         } catch (error) {
             const message = error instanceof Error ? error.message : "Unknown Qdrant error";
             throw new Error(`Failed to recreate collection: ${message}`);
@@ -151,16 +142,12 @@ export class QdrantPersistence {
 
         try {
             // Check if collection exists
-            console.log(`Checking if collection ${COLLECTION_NAME} exists...`);
             const collections = await this.client.getCollections();
             const collection = collections.collections.find(
                 (c) => c.name === COLLECTION_NAME
             );
 
             if (!collection) {
-                console.log(
-                `Creating new collection ${COLLECTION_NAME} with vector size ${requiredVectorSize}`
-                );
                 await this.client.createCollection(COLLECTION_NAME, {
                 vectors: {
                     size: requiredVectorSize,
@@ -171,7 +158,6 @@ export class QdrantPersistence {
             }
 
             // Get collection info to check vector size
-            console.log(`Retrieving collection info for ${COLLECTION_NAME}...`);
             const collectionInfo = (await this.client.getCollection(
                 COLLECTION_NAME
             )) as QdrantCollectionInfo;
@@ -179,17 +165,11 @@ export class QdrantPersistence {
                 collectionInfo.config?.params?.vectors?.size;
 
             if (!currentVectorSize) {
-                console.log(
-                "Could not determine current vector size, recreating collection..."
-                );
                 await this.recreateCollection(requiredVectorSize);
                 return;
             }
 
             if (currentVectorSize !== requiredVectorSize) {
-                console.log(
-                `Vector size mismatch: collection=${currentVectorSize}, required=${requiredVectorSize}`
-                );
                 await this.recreateCollection(requiredVectorSize);
             }
         } catch (error) {
