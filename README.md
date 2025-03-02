@@ -1,4 +1,5 @@
 # MCP Memory Server with Qdrant Persistence
+[![smithery badge](https://smithery.ai/badge/@delorenj/mcp-qdrant-memory)](https://smithery.ai/server/@delorenj/mcp-qdrant-memory)
 
 This MCP server provides a knowledge graph implementation with semantic search capabilities powered by Qdrant vector database.
 
@@ -9,6 +10,7 @@ This MCP server provides a knowledge graph implementation with semantic search c
 - Semantic search using Qdrant vector database
 - OpenAI embeddings for semantic similarity
 - HTTPS support with reverse proxy compatibility
+- Docker support for easy deployment
 
 ## Environment Variables
 
@@ -30,6 +32,8 @@ QDRANT_COLLECTION_NAME=your-collection-name
 
 ## Setup
 
+### Local Setup
+
 1. Install dependencies:
 ```bash
 npm install
@@ -40,7 +44,25 @@ npm install
 npm run build
 ```
 
-3. Add to MCP settings:
+### Docker Setup
+
+1. Build the Docker image:
+```bash
+docker build -t mcp-qdrant-memory .
+```
+
+2. Run the Docker container with required environment variables:
+```bash
+docker run -d \
+  -e OPENAI_API_KEY=your-openai-api-key \
+  -e QDRANT_URL=http://your-qdrant-server:6333 \
+  -e QDRANT_COLLECTION_NAME=your-collection-name \
+  -e QDRANT_API_KEY=your-qdrant-api-key \
+  --name mcp-qdrant-memory \
+  mcp-qdrant-memory
+```
+
+### Add to MCP settings:
 ```json
 {
   "mcpServers": {
@@ -194,46 +216,6 @@ curl -v https://qdrant.yourdomain.com/collections
 3. Check for any proxy settings:
 ```bash
 env | grep -i proxy
-```
-
-## Setup
-
-1. Install dependencies:
-```bash
-npm install
-```
-
-2. Build the server:
-```bash
-npm run build
-```
-
-3. Add to MCP settings:
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "/bin/zsh",
-      "args": ["-c", "cd /path/to/server && node dist/index.js"],
-      "env": {
-        "OPENAI_API_KEY": "your-openai-api-key",
-        "QDRANT_URL": "https://your-qdrant-server",
-        "QDRANT_API_KEY": "your-qdrant-api-key",
-        "QDRANT_COLLECTION_NAME": "your-collection-name"
-      },
-      "alwaysAllow": [
-        "create_entities",
-        "create_relations",
-        "add_observations",
-        "delete_entities",
-        "delete_observations",
-        "delete_relations",
-        "read_graph",
-        "search_similar"
-      ]
-    }
-  }
-}
 ```
 
 ## Contributing

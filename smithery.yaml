@@ -1,0 +1,30 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      openaiApiKey:
+        type: string
+        description: "OpenAI API key for generating embeddings"
+      qdrantApiKey:
+        type: string
+        description: "Qdrant API key for vector database access"
+      qdrantUrl:
+        type: string
+        description: "URL of the Qdrant instance"
+        default: "http://localhost:6333"
+    required: ["openaiApiKey", "qdrantApiKey"]
+    additionalProperties: false
+  commandFunction: |
+    function getStartCommand(config) {
+      return {
+        command: "node",
+        args: ["dist/index.js"],
+        env: {
+          NODE_ENV: "production",
+          OPENAI_API_KEY: config.openaiApiKey,
+          QDRANT_API_KEY: config.qdrantApiKey,
+          QDRANT_URL: config.qdrantUrl
+        }
+      };
+    }
