@@ -25,9 +25,7 @@ class CustomQdrantClient extends QdrantClient {
 
   // Override request method to log requests
   async getCollections() {
-    console.log('Getting collections...');
-    const result = await super.getCollections();
-    console.log('Collections response:', result);
+    const result = await super.getCollections();   
     return result;
   }
 }
