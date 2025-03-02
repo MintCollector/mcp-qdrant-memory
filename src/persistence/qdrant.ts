@@ -9,6 +9,29 @@ import {
 } from "../config.js";
 import { Entity, Relation } from "../types.js";
 
+// Create custom Qdrant client that adds auth header
+class CustomQdrantClient extends QdrantClient {
+  constructor(url: string) {
+    const parsed = new URL(url);
+    super({
+      url: `${parsed.protocol}//${parsed.hostname}`,
+      port: parsed.port ? parseInt(parsed.port) : 6333,
+      https: parsed.protocol === 'https:',
+      apiKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.x6NrWBMMtPqcep5dNxOqjXT42sQhATAMdxEqVFDJKew',
+      timeout: 60000,
+      checkCompatibility: false
+    });
+  }
+
+  // Override request method to log requests
+  async getCollections() {
+    console.log('Getting collections...');
+    const result = await super.getCollections();
+    console.log('Collections response:', result);
+    return result;
+  }
+}
+
 interface EntityPayload extends Entity {
   type: "entity";
 }
@@ -52,7 +75,7 @@ function isRelation(payload: Payload): payload is RelationPayload {
 }
 
 export class QdrantPersistence {
-  private client: QdrantClient;
+  private client: CustomQdrantClient;
   private openai: OpenAI;
   private initialized: boolean = false;
 
@@ -69,12 +92,7 @@ export class QdrantPersistence {
       throw new Error("QDRANT_URL must start with http:// or https://");
     }
 
-    this.client = new QdrantClient({
-      url: QDRANT_URL,
-      apiKey: QDRANT_API_KEY,
-      timeout: 60000,
-      checkCompatibility: false, // Disable version check
-    });
+    this.client = new CustomQdrantClient(QDRANT_URL);
 
     this.openai = new OpenAI({
       apiKey: OPENAI_API_KEY,
@@ -109,77 +127,75 @@ export class QdrantPersistence {
         delay *= 2; // Exponential backoff
       }
     }
-
   }
 
-    private async recreateCollection(vectorSize: number) {
-        if (!COLLECTION_NAME) {
-            throw new Error("COLLECTION_NAME environment variable is required in recreateCollection");
-        }
+  async initialize() {
+    await this.connect();
 
-        try {
-            await this.client.deleteCollection(COLLECTION_NAME);
-            await this.client.createCollection(COLLECTION_NAME, {
-                vectors: {
-                size: vectorSize,
-                distance: 'Cosine',
-                },
-            });
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Unknown Qdrant error";
-            throw new Error(`Failed to recreate collection: ${message}`);
-        }
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required");
     }
 
-    async initialize() {
-        await this.connect();
+    const requiredVectorSize = 1536; // OpenAI embedding dimension
 
-        if (!COLLECTION_NAME) {
-            throw new Error("COLLECTION_NAME environment variable is required");
-        }
+    try {
+      // Check if collection exists
+      const collections = await this.client.getCollections();
+      const collection = collections.collections.find(
+        (c) => c.name === COLLECTION_NAME
+      );
 
-        const requiredVectorSize = 1536; // OpenAI embedding dimension
+      if (!collection) {
+        await this.client.createCollection(COLLECTION_NAME, {
+          vectors: {
+            size: requiredVectorSize,
+            distance: "Cosine",
+          },
+        });
+        return;
+      }
 
-        try {
-            // Check if collection exists
-            const collections = await this.client.getCollections();
-            const collection = collections.collections.find(
-                (c) => c.name === COLLECTION_NAME
-            );
+      // Get collection info to check vector size
+      const collectionInfo = (await this.client.getCollection(
+        COLLECTION_NAME
+      )) as QdrantCollectionInfo;
+      const currentVectorSize = collectionInfo.config?.params?.vectors?.size;
 
-            if (!collection) {
-                await this.client.createCollection(COLLECTION_NAME, {
-                vectors: {
-                    size: requiredVectorSize,
-                    distance: "Cosine",
-                },
-                });
-                return;
-            }
+      if (!currentVectorSize) {
+        await this.recreateCollection(requiredVectorSize);
+        return;
+      }
 
-            // Get collection info to check vector size
-            const collectionInfo = (await this.client.getCollection(
-                COLLECTION_NAME
-            )) as QdrantCollectionInfo;
-            const currentVectorSize =
-                collectionInfo.config?.params?.vectors?.size;
-
-            if (!currentVectorSize) {
-                await this.recreateCollection(requiredVectorSize);
-                return;
-            }
-
-            if (currentVectorSize !== requiredVectorSize) {
-                await this.recreateCollection(requiredVectorSize);
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown Qdrant error';
-            console.error("Failed to initialize collection:", message);
-            throw new Error(
-                `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
-            );
-        }
+      if (currentVectorSize !== requiredVectorSize) {
+        await this.recreateCollection(requiredVectorSize);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+      console.error("Failed to initialize collection:", message);
+      throw new Error(
+        `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
+      );
     }
+  }
+
+  private async recreateCollection(vectorSize: number) {
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required in recreateCollection");
+    }
+
+    try {
+      await this.client.deleteCollection(COLLECTION_NAME);
+      await this.client.createCollection(COLLECTION_NAME, {
+        vectors: {
+          size: vectorSize,
+          distance: "Cosine",
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+      throw new Error(`Failed to recreate collection: ${message}`);
+    }
+  }
 
   private async generateEmbedding(text: string) {
     try {
