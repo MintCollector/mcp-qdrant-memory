@@ -19,27 +19,18 @@ import {
   Entity, 
   Relation, 
   KnowledgeGraph, 
-  BatchMemoryWithRelationships,
-  MemoryConnectionAnalysis,
-  RelationshipChain,
-  SearchFilters,
-  HybridSearchResult
+
 } from './types.js';
 import {
   validateCreateEntitiesRequest,
-  validateCreateRelationsRequest,
   validateAddObservationsRequest,
   validateDeleteEntitiesRequest,
   validateDeleteObservationsRequest,
-  validateDeleteRelationsRequest,
-  validateSearchSimilarRequest,
-  validateSaveMemoriesWithRelationshipsRequest,
-  validateBatchCreateRelationshipsRequest,
-  validateAnalyzeMemoryConnectionsRequest,
-  validateGetRelationshipsByTypeRequest,
-  validateFindRelationshipChainsRequest,
-  validateSearchWithFiltersRequest,
-  validateHybridSearchRequest,
+  validateSemanticSearchRequest,
+  validateCreateRelationshipsRequest,
+  validateDeleteRelationshipsRequest,
+  validateSearchRelatedRequest,
+
 } from './validation.js';
 
 // Define paths
@@ -174,266 +165,76 @@ class KnowledgeGraphManager {
     return await this.qdrant.searchSimilar(query, validLimit);
   }
 
-  // New batch operations for meta-learning
-  async saveMemoriesWithRelationships(data: BatchMemoryWithRelationships): Promise<{ memory_ids: string[]; relationship_ids: string[] }> {
-    const memory_ids: string[] = [];
-    const relationship_ids: string[] = [];
-
-    // Add entities to graph
-    for (const entity of data.memories) {
-      // Ensure entity has proper metadata
-      if (!entity.metadata) {
-        entity.metadata = { created_at: new Date().toISOString() };
-      }
-      if (!entity.metadata.id) {
-        entity.metadata.id = `entity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      }
-      
-      const existingIndex = this.graph.entities.findIndex((e: Entity) => e.name === entity.name);
-      if (existingIndex !== -1) {
-        this.graph.entities[existingIndex] = entity;
-      } else {
-        this.graph.entities.push(entity);
-      }
-      memory_ids.push(entity.metadata.id);
-    }
-
-    // Add relationships to graph
-    for (const relation of data.relationships) {
-      // Ensure relation has proper metadata
-      if (!relation.metadata) {
-        relation.metadata = { created_at: new Date().toISOString() };
-      }
-      
-      // Validate entities exist
-      if (!this.graph.entities.some(e => e.name === relation.from)) {
-        throw new Error(`Entity not found: ${relation.from}`);
-      }
-      if (!this.graph.entities.some(e => e.name === relation.to)) {
-        throw new Error(`Entity not found: ${relation.to}`);
-      }
-
-      const existingIndex = this.graph.relations.findIndex(
-        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
-      );
-      if (existingIndex !== -1) {
-        this.graph.relations[existingIndex] = relation;
-      } else {
-        this.graph.relations.push(relation);
-      }
-      relationship_ids.push(`${relation.from}-${relation.relationType}-${relation.to}`);
-    }
-
-    // Batch persist to Qdrant
-    await this.qdrant.batchPersistEntities(data.memories);
-    await this.qdrant.batchPersistRelations(data.relationships);
-    
-    // Save to file
-    await this.save();
-
-    return { memory_ids, relationship_ids };
-  }
-
-  async batchCreateRelationships(relationships: Array<{source_id: string; target_id: string; type: string; metadata?: any}>): Promise<{ relationship_ids: string[] }> {
-    const relationship_ids: string[] = [];
-    const relationsToAdd: Relation[] = [];
-
-    for (const rel of relationships) {
-      // Find entities by ID (check metadata.id) or name
-      const sourceEntity = this.graph.entities.find(e => e.metadata?.id === rel.source_id || e.name === rel.source_id);
-      const targetEntity = this.graph.entities.find(e => e.metadata?.id === rel.target_id || e.name === rel.target_id);
-
-      if (!sourceEntity || !targetEntity) {
-        throw new Error(`Entity not found: ${!sourceEntity ? rel.source_id : rel.target_id}`);
-      }
-
-      const relation: Relation = {
-        from: sourceEntity.name,
-        to: targetEntity.name,
-        relationType: rel.type,
-        metadata: rel.metadata || { created_at: new Date().toISOString() }
-      };
-
-      const existingIndex = this.graph.relations.findIndex(
-        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
-      );
-      
-      if (existingIndex !== -1) {
-        this.graph.relations[existingIndex] = relation;
-      } else {
-        this.graph.relations.push(relation);
-      }
-      
-      relationsToAdd.push(relation);
-      relationship_ids.push(`${relation.from}-${relation.relationType}-${relation.to}`);
-    }
-
-    // Batch persist to Qdrant
-    await this.qdrant.batchPersistRelations(relationsToAdd);
-    
-    // Save to file
-    await this.save();
-
-    return { relationship_ids };
-  }
-
-  async analyzeMemoryConnections(memoryId: string): Promise<MemoryConnectionAnalysis> {
-    // Find entity by ID or name
-    const entity = this.graph.entities.find(e => e.metadata?.id === memoryId || e.name === memoryId);
-    if (!entity) {
-      throw new Error(`Memory not found: ${memoryId}`);
-    }
-
-    // Get all relationships involving this entity
-    const relatedRelations = this.graph.relations.filter(r => r.from === entity.name || r.to === entity.name);
-    
-    // Count relationship types
-    const relationshipTypes = [...new Set(relatedRelations.map(r => r.relationType))];
-    
-    // Calculate connection strength (simple metric based on number of connections and their strength)
-    let connectionStrength = 0;
-    const relatedEntities = new Set<string>();
-    
-    for (const rel of relatedRelations) {
-      const relatedEntity = rel.from === entity.name ? rel.to : rel.from;
-      relatedEntities.add(relatedEntity);
-      
-      // Factor in relationship metadata strength if available
-      const strength = rel.metadata?.strength || 0.5;
-      connectionStrength += strength;
-    }
-    
-    // Normalize by number of connections
-    connectionStrength = relatedEntities.size > 0 ? connectionStrength / relatedEntities.size : 0;
-
-    // Simple clustering - group related entities by relationship type
-    const clusters: Array<{ cluster_id: string; entities: string[]; strength: number }> = [];
-    const relationshipGroups = new Map<string, string[]>();
-    
-    for (const rel of relatedRelations) {
-      const relatedEntity = rel.from === entity.name ? rel.to : rel.from;
-      if (!relationshipGroups.has(rel.relationType)) {
-        relationshipGroups.set(rel.relationType, []);
-      }
-      relationshipGroups.get(rel.relationType)!.push(relatedEntity);
-    }
-    
-    for (const [relType, entities] of relationshipGroups) {
-      clusters.push({
-        cluster_id: `${relType}_cluster`,
-        entities: [...new Set(entities)],
-        strength: entities.length / relatedEntities.size
-      });
-    }
-
-    return {
-      memory_id: memoryId,
-      relationship_types: relationshipTypes,
-      connection_strength: connectionStrength,
-      related_clusters: clusters
-    };
-  }
-
-  async getRelationshipsByType(relationshipType: string): Promise<Relation[]> {
-    return await this.qdrant.getRelationshipsByType(relationshipType);
-  }
-
-  async findRelationshipChains(startMemoryId: string, maxDepth: number): Promise<RelationshipChain[]> {
-    // Find starting entity
-    const startEntity = this.graph.entities.find(e => e.metadata?.id === startMemoryId || e.name === startMemoryId);
+  async searchRelated(entityName: string, maxDepth: number = 2, relationshipTypes?: string[]): Promise<{
+    entities: Entity[];
+    relationships: Relation[];
+    paths: Array<{
+      path: string[];
+      depth: number;
+    }>;
+  }> {
+    // Find the starting entity
+    const startEntity = this.graph.entities.find(e => e.name === entityName);
     if (!startEntity) {
-      throw new Error(`Memory not found: ${startMemoryId}`);
+      throw new Error(`Entity not found: ${entityName}`);
     }
 
-    const chains: RelationshipChain[] = [];
+    const relatedEntities = new Set<string>();
+    const relatedRelationships: Relation[] = [];
+    const paths: Array<{ path: string[]; depth: number }> = [];
     const visited = new Set<string>();
 
-    const findChains = (currentEntity: string, currentChain: string[], depth: number, totalStrength: number) => {
-      if (depth >= maxDepth) return;
-      
-      const outgoingRelations = this.graph.relations.filter(r => r.from === currentEntity);
-      
-      for (const relation of outgoingRelations) {
-        if (visited.has(`${currentEntity}-${relation.to}`)) continue;
+    // Recursive function to traverse the graph
+    const traverse = (currentEntity: string, currentPath: string[], depth: number) => {
+      if (depth > maxDepth || visited.has(currentEntity)) {
+        return;
+      }
+
+      visited.add(currentEntity);
+      relatedEntities.add(currentEntity);
+
+      if (depth > 0) {
+        paths.push({ path: [...currentPath], depth });
+      }
+
+      // Find all relationships involving this entity
+      const entityRelations = this.graph.relations.filter(r => {
+        const isConnected = r.from === currentEntity || r.to === currentEntity;
+        const typeMatches = !relationshipTypes || relationshipTypes.includes(r.relationType);
+        return isConnected && typeMatches;
+      });
+
+      for (const relation of entityRelations) {
+        // Add the relationship to results
+        relatedRelationships.push(relation);
+
+        // Get the connected entity
+        const connectedEntity = relation.from === currentEntity ? relation.to : relation.from;
         
-        const newChain = [...currentChain, relation.to];
-        const relationStrength = relation.metadata?.strength || 0.5;
-        const newTotalStrength = totalStrength + relationStrength;
-        
-        chains.push({
-          chain: [startEntity.name, ...newChain],
-          depth: depth + 1,
-          chain_type: relation.relationType,
-          total_strength: newTotalStrength / (depth + 1) // Average strength
-        });
-        
-        visited.add(`${currentEntity}-${relation.to}`);
-        findChains(relation.to, newChain, depth + 1, newTotalStrength);
-        visited.delete(`${currentEntity}-${relation.to}`);
+        // Continue traversal if within depth limit
+        if (depth < maxDepth && !visited.has(connectedEntity)) {
+          traverse(connectedEntity, [...currentPath, connectedEntity], depth + 1);
+        } else if (!relatedEntities.has(connectedEntity)) {
+          relatedEntities.add(connectedEntity);
+        }
       }
     };
 
-    findChains(startEntity.name, [], 0, 0);
-    
-    // Sort by total strength descending
-    return chains.sort((a, b) => (b.total_strength || 0) - (a.total_strength || 0));
-  }
+    // Start traversal from the given entity
+    traverse(entityName, [entityName], 0);
 
-  async searchWithFilters(query: string, filters?: SearchFilters, limit: number = 10): Promise<Array<Entity | Relation>> {
-    const validLimit = Math.max(1, Math.min(limit, 100));
-    return await this.qdrant.searchWithFilters(query, filters, validLimit);
-  }
+    // Get full entity objects for all related entities
+    const entities = this.graph.entities.filter(e => relatedEntities.has(e.name));
 
-  async hybridSearch(query: string, relationshipPaths?: string[], limit: number = 10, filters?: SearchFilters): Promise<HybridSearchResult> {
-    const validLimit = Math.max(1, Math.min(limit, 100));
-    
-    // Start with semantic search
-    const semanticResults = await this.qdrant.searchWithFilters(query, filters, validLimit * 2);
-    
-    const memories: Entity[] = [];
-    const relationshipContext: Array<{
-      source: Entity;
-      target: Entity;
-      relation: Relation;
-      path_relevance: number;
-    }> = [];
-    
-    // Filter to entities only for memories
-    for (const result of semanticResults) {
-      if ('entityType' in result) {
-        memories.push(result as Entity);
-      }
-    }
-    
-    // If relationship paths are specified, find relevant connections
-    if (relationshipPaths && relationshipPaths.length > 0) {
-      const pathRelations = this.graph.relations.filter(r => 
-        relationshipPaths.includes(r.relationType)
-      );
-      
-      // Find relationships that connect our semantic results
-      for (const relation of pathRelations) {
-        const sourceEntity = memories.find(e => e.name === relation.from);
-        const targetEntity = memories.find(e => e.name === relation.to);
-        
-        if (sourceEntity && targetEntity) {
-          relationshipContext.push({
-            source: sourceEntity,
-            target: targetEntity,
-            relation,
-            path_relevance: relation.metadata?.strength || 0.5
-          });
-        }
-      }
-    }
-    
-    // Sort relationship context by relevance
-    relationshipContext.sort((a, b) => b.path_relevance - a.path_relevance);
-    
+    // Remove duplicates from relationships
+    const uniqueRelationships = Array.from(
+      new Map(relatedRelationships.map(r => [`${r.from}-${r.relationType}-${r.to}`, r])).values()
+    );
+
     return {
-      memories: memories.slice(0, validLimit),
-      relationship_context: relationshipContext,
-      total_count: memories.length
+      entities,
+      relationships: uniqueRelationships,
+      paths
     };
   }
 }
@@ -497,12 +298,12 @@ class MemoryServer {
           }
         },
         {
-          name: "create_relations",
-          description: "Create relationships between existing entities. Use for connecting concepts, facts, or learning patterns. Input: {relations: [{from: string, to: string, relationType: string, metadata?: object}]}",
+          name: "create_relationships",
+          description: "Create relationships between existing entities. Use for connecting concepts, facts, or learning patterns. Input: {relationships: [{from: string, to: string, relationType: string, metadata?: object}]}",
           inputSchema: {
             type: "object",
             properties: {
-              relations: {
+              relationships: {
                 type: "array",
                 items: {
                   type: "object",
@@ -515,7 +316,7 @@ class MemoryServer {
                 }
               }
             },
-            required: ["relations"]
+            required: ["relationships"]
           }
         },
         {
@@ -581,12 +382,12 @@ class MemoryServer {
           }
         },
         {
-          name: "delete_relations",
-          description: "Remove specific relationships between entities. Use for correcting connection errors. Input: {relations: [{from: string, to: string, relationType: string}]}",
+          name: "delete_relationships",
+          description: "Remove specific relationships between entities. Use for correcting connection errors. Input: {relationships: [{from: string, to: string, relationType: string}]}",
           inputSchema: {
             type: "object",
             properties: {
-              relations: {
+              relationships: {
                 type: "array",
                 items: {
                   type: "object",
@@ -599,7 +400,7 @@ class MemoryServer {
                 }
               }
             },
-            required: ["relations"]
+            required: ["relationships"]
           }
         },
         {
@@ -611,7 +412,7 @@ class MemoryServer {
           }
         },
         {
-          name: "search_similar",
+          name: "semantic_search",
           description: "Find semantically similar entities and relationships using AI embeddings. Use for discovering related concepts. Input: {query: string, limit?: number}",
           inputSchema: {
             type: "object",
@@ -626,192 +427,24 @@ class MemoryServer {
           }
         },
         {
-          name: "save_memories_with_relationships",
-          description: "Store multiple related memories and connections atomically. Use for meta-learning patterns that connect to each other. Input: {memories: Array, relationships: Array}",
+          name: "search_related",
+          description: "Find entities connected through the knowledge graph structure. Use for discovering related information via relationships. Input: {entityName: string, maxDepth?: number, relationshipTypes?: string[]}",
           inputSchema: {
             type: "object",
             properties: {
-              memories: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    entityType: { type: "string" },
-                    observations: {
-                      type: "array",
-                      items: { type: "string" }
-                    },
-                    metadata: {
-                      type: "object",
-                      properties: {
-                        id: { type: "string" },
-                        created_at: { type: "string" },
-                        tags: { type: "array", items: { type: "string" } },
-                        domain: { type: "string" },
-                        content: { type: "string" }
-                      }
-                    }
-                  },
-                  required: ["name", "entityType", "observations"]
-                }
+              entityName: { type: "string" },
+              maxDepth: { 
+                type: "number",
+                default: 2,
+                minimum: 1,
+                maximum: 5
               },
-              relationships: {
+              relationshipTypes: {
                 type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    from: { type: "string" },
-                    to: { type: "string" },
-                    relationType: { type: "string" },
-                    metadata: {
-                      type: "object",
-                      properties: {
-                        strength: { type: "number", minimum: 0, maximum: 1 },
-                        created_at: { type: "string" },
-                        context: { type: "string" },
-                        evidence: { type: "array", items: { type: "string" } }
-                      }
-                    }
-                  },
-                  required: ["from", "to", "relationType"]
-                }
+                items: { type: "string" }
               }
             },
-            required: ["memories", "relationships"]
-          }
-        },
-        {
-          name: "batch_create_relationships",
-          description: "Create multiple relationships efficiently in one operation. Use for connecting many entities at once. Input: {relationships: [{source_id: string, target_id: string, type: string, metadata?: object}]}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              relationships: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    source_id: { type: "string" },
-                    target_id: { type: "string" },
-                    type: { type: "string" },
-                    metadata: {
-                      type: "object",
-                      properties: {
-                        strength: { type: "number", minimum: 0, maximum: 1 },
-                        created_at: { type: "string" },
-                        context: { type: "string" },
-                        evidence: { type: "array", items: { type: "string" } }
-                      }
-                    }
-                  },
-                  required: ["source_id", "target_id", "type"]
-                }
-              }
-            },
-            required: ["relationships"]
-          }
-        },
-        {
-          name: "analyze_memory_connections",
-          description: "Analyze connection patterns and relationship strength for a specific memory. Use for understanding knowledge clusters. Input: {memory_id: string}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              memory_id: { type: "string" }
-            },
-            required: ["memory_id"]
-          }
-        },
-        {
-          name: "get_relationships_by_type",
-          description: "Retrieve all relationships of a specific type (validates, contradicts, builds_upon, etc.). Use for exploring relationship patterns. Input: {relationship_type: string}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              relationship_type: { type: "string" }
-            },
-            required: ["relationship_type"]
-          }
-        },
-        {
-          name: "find_relationship_chains",
-          description: "Discover relationship chains (A→B→C) to trace knowledge paths. Use for understanding learning progression. Input: {start_memory_id: string, max_depth: number}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              start_memory_id: { type: "string" },
-              max_depth: { type: "number", minimum: 1, maximum: 10 }
-            },
-            required: ["start_memory_id", "max_depth"]
-          }
-        },
-        {
-          name: "search_with_filters",
-          description: "Enhanced semantic search with filters for entity types, dates, domains, and tags. Use for targeted discovery. Input: {query: string, filters?: object, limit?: number}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string" },
-              filters: {
-                type: "object",
-                properties: {
-                  entity_types: { type: "array", items: { type: "string" } },
-                  date_range: {
-                    type: "object",
-                    properties: {
-                      start: { type: "string" },
-                      end: { type: "string" }
-                    },
-                    required: ["start", "end"]
-                  },
-                  relationship_constraints: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        type: { type: "string" },
-                        direction: { type: "string", enum: ["inbound", "outbound", "both"] }
-                      },
-                      required: ["type"]
-                    }
-                  },
-                  domains: { type: "array", items: { type: "string" } },
-                  tags: { type: "array", items: { type: "string" } }
-                }
-              },
-              limit: { type: "number", default: 10 }
-            },
-            required: ["query"]
-          }
-        },
-        {
-          name: "hybrid_search",
-          description: "Combines vector similarity search with graph traversal for comprehensive discovery. Use for complex knowledge exploration. Input: {query: string, relationship_paths?: string[], limit?: number, filters?: object}",
-          inputSchema: {
-            type: "object",
-            properties: {
-              query: { type: "string" },
-              relationship_paths: { type: "array", items: { type: "string" } },
-              limit: { type: "number", default: 10 },
-              filters: {
-                type: "object",
-                properties: {
-                  entity_types: { type: "array", items: { type: "string" } },
-                  date_range: {
-                    type: "object",
-                    properties: {
-                      start: { type: "string" },
-                      end: { type: "string" }
-                    },
-                    required: ["start", "end"]
-                  },
-                  domains: { type: "array", items: { type: "string" } },
-                  tags: { type: "array", items: { type: "string" } }
-                }
-              }
-            },
-            required: ["query"]
+            required: ["entityName"]
           }
         }
       ],
@@ -835,11 +468,11 @@ class MemoryServer {
             };
           }
 
-          case "create_relations": {
-            const args = validateCreateRelationsRequest(request.params.arguments);
-            await this.graphManager.addRelations(args.relations);
+          case "create_relationships": {
+            const args = validateCreateRelationshipsRequest(request.params.arguments);
+            await this.graphManager.addRelations(args.relationships);
             return {
-              content: [{ type: "text", text: "Relations created successfully" }],
+              content: [{ type: "text", text: "Relationships created successfully" }],
             };
           }
 
@@ -871,11 +504,11 @@ class MemoryServer {
             };
           }
 
-          case "delete_relations": {
-            const args = validateDeleteRelationsRequest(request.params.arguments);
-            await this.graphManager.deleteRelations(args.relations);
+          case "delete_relationships": {
+            const args = validateDeleteRelationshipsRequest(request.params.arguments);
+            await this.graphManager.deleteRelations(args.relationships);
             return {
-              content: [{ type: "text", text: "Relations deleted successfully" }],
+              content: [{ type: "text", text: "Relationships deleted successfully" }],
             };
           }
 
@@ -889,8 +522,8 @@ class MemoryServer {
               ],
             };
 
-          case "search_similar": {
-            const args = validateSearchSimilarRequest(request.params.arguments);
+          case "semantic_search": {
+            const args = validateSemanticSearchRequest(request.params.arguments);
             const results = await this.graphManager.searchSimilar(
               args.query,
               args.limit
@@ -905,104 +538,18 @@ class MemoryServer {
             };
           }
 
-          case "save_memories_with_relationships": {
-            const args = validateSaveMemoriesWithRelationshipsRequest(request.params.arguments);
-            const result = await this.graphManager.saveMemoriesWithRelationships(args);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "batch_create_relationships": {
-            const args = validateBatchCreateRelationshipsRequest(request.params.arguments);
-            const result = await this.graphManager.batchCreateRelationships(args.relationships);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "analyze_memory_connections": {
-            const args = validateAnalyzeMemoryConnectionsRequest(request.params.arguments);
-            const result = await this.graphManager.analyzeMemoryConnections(args.memory_id);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "get_relationships_by_type": {
-            const args = validateGetRelationshipsByTypeRequest(request.params.arguments);
-            const result = await this.graphManager.getRelationshipsByType(args.relationship_type);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "find_relationship_chains": {
-            const args = validateFindRelationshipChainsRequest(request.params.arguments);
-            const result = await this.graphManager.findRelationshipChains(
-              args.start_memory_id,
-              args.max_depth
+          case "search_related": {
+            const args = validateSearchRelatedRequest(request.params.arguments);
+            const results = await this.graphManager.searchRelated(
+              args.entityName,
+              args.maxDepth,
+              args.relationshipTypes
             );
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "search_with_filters": {
-            const args = validateSearchWithFiltersRequest(request.params.arguments);
-            const result = await this.graphManager.searchWithFilters(
-              args.query,
-              args.filters,
-              args.limit
-            );
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case "hybrid_search": {
-            const args = validateHybridSearchRequest(request.params.arguments);
-            const result = await this.graphManager.hybridSearch(
-              args.query,
-              args.relationship_paths,
-              args.limit,
-              args.filters
-            );
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify(result, null, 2),
+                  text: JSON.stringify(results, null, 2),
                 },
               ],
             };

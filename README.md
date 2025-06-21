@@ -109,7 +109,7 @@ docker run -d \
         "delete_observations",
         "delete_relations",
         "read_graph",
-        "search_similar"
+        "semantic_search"
       ]
     }
   }
@@ -139,7 +139,7 @@ docker run -d \
         "delete_observations",
         "delete_relations",
         "read_graph",
-        "search_similar"
+        "semantic_search"
       ]
     }
   }
@@ -158,7 +158,7 @@ docker run -d \
 - `read_graph`: Get the full knowledge graph
 
 ### Semantic Search
-- `search_similar`: Search for semantically similar entities and relations
+- `semantic_search`: Search for semantically similar entities and relations (vector database only)
   ```typescript
   interface SearchParams {
     query: string;     // Search query text

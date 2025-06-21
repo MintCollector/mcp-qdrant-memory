@@ -73,7 +73,7 @@ The server validates all required environment variables at startup in `src/confi
 
 ### MCP Tools
 
-The server exposes 15 tools for knowledge graph operations:
+The server exposes 8 streamlined tools for knowledge graph operations:
 
 **Core Operations:**
 - `create_entities` - Create multiple entities
@@ -83,16 +83,7 @@ The server exposes 15 tools for knowledge graph operations:
 - `delete_observations` - Delete specific observations
 - `delete_relations` - Delete specific relations
 - `read_graph` - Get the complete knowledge graph
-- `search_similar` - Semantic search with configurable limit
-
-**Meta-Learning Extensions:**
-- `save_memories_with_relationships` - Batch create memories and relationships atomically
-- `batch_create_relationships` - Create multiple relationships in one operation
-- `analyze_memory_connections` - Analyze connection patterns for specific memory
-- `get_relationships_by_type` - Get all relationships of a specific type
-- `find_relationship_chains` - Discover relationship chains (A→B→C)
-- `search_with_filters` - Enhanced search with type/date/relationship filters
-- `hybrid_search` - Vector similarity + graph traversal combined
+- `semantic_search` - Semantic search with configurable limit (vector database only)
 
 ### Error Handling
 
