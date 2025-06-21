@@ -17,8 +17,17 @@ This MCP server provides a knowledge graph implementation with semantic search c
 The following environment variables are required:
 
 ```bash
-# OpenAI API key for generating embeddings
+# Embedding provider: 'openai' or 'google' (default: 'openai')
+EMBEDDING_PROVIDER=openai
+
+# Embedding model (optional, defaults based on provider)
+EMBEDDING_MODEL=text-embedding-ada-002
+
+# For OpenAI embeddings
 OPENAI_API_KEY=your-openai-api-key
+
+# For Google embeddings
+GOOGLE_API_KEY=your-google-api-key
 
 # Qdrant server URL (supports both HTTP and HTTPS)
 QDRANT_URL=https://your-qdrant-server
@@ -29,6 +38,19 @@ QDRANT_API_KEY=your-qdrant-api-key
 # Name of the Qdrant collection to use
 QDRANT_COLLECTION_NAME=your-collection-name
 ```
+
+## Supported Embedding Models
+
+### OpenAI Models
+- `text-embedding-ada-002` (1536 dimensions) - Default
+- `text-embedding-3-small` (1536 dimensions) 
+- `text-embedding-3-large` (3072 dimensions)
+
+### Google Models  
+- `text-embedding-004` (768 dimensions) - Default for Google
+- `textembedding-gecko` (768 dimensions)
+
+The system automatically detects vector dimensions and recreates the Qdrant collection when switching between models with different dimensions.
 
 ## Setup
 
@@ -63,6 +85,8 @@ docker run -d \
 ```
 
 ### Add to MCP settings:
+
+#### For OpenAI Embeddings:
 ```json
 {
   "mcpServers": {
@@ -70,7 +94,39 @@ docker run -d \
       "command": "/bin/zsh",
       "args": ["-c", "cd /path/to/server && node dist/index.js"],
       "env": {
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_MODEL": "text-embedding-ada-002",
         "OPENAI_API_KEY": "your-openai-api-key",
+        "QDRANT_API_KEY": "your-qdrant-api-key",
+        "QDRANT_URL": "http://your-qdrant-server:6333",
+        "QDRANT_COLLECTION_NAME": "your-collection-name"
+      },
+      "alwaysAllow": [
+        "create_entities",
+        "create_relations",
+        "add_observations",
+        "delete_entities",
+        "delete_observations",
+        "delete_relations",
+        "read_graph",
+        "search_similar"
+      ]
+    }
+  }
+}
+```
+
+#### For Google Embeddings:
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "/bin/zsh",
+      "args": ["-c", "cd /path/to/server && node dist/index.js"],
+      "env": {
+        "EMBEDDING_PROVIDER": "google",
+        "EMBEDDING_MODEL": "text-embedding-004",
+        "GOOGLE_API_KEY": "your-google-api-key",
         "QDRANT_API_KEY": "your-qdrant-api-key",
         "QDRANT_URL": "http://your-qdrant-server:6333",
         "QDRANT_COLLECTION_NAME": "your-collection-name"

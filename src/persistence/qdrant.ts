@@ -1,23 +1,27 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import crypto from "crypto";
 import {
+  EMBEDDING_PROVIDER,
+  FINAL_EMBEDDING_MODEL,
   QDRANT_URL,
   COLLECTION_NAME,
   OPENAI_API_KEY,
+  GOOGLE_API_KEY,
   QDRANT_API_KEY
 } from "../config.js";
 import { Entity, Relation } from "../types.js";
 
-// Create custom Qdrant client that adds auth header
+// Create custom Qdrant client that uses environment API key
 class CustomQdrantClient extends QdrantClient {
-  constructor(url: string) {
+  constructor(url: string, apiKey?: string) {
     const parsed = new URL(url);
     super({
       url: `${parsed.protocol}//${parsed.hostname}`,
       port: parsed.port ? parseInt(parsed.port) : 6333,
       https: parsed.protocol === 'https:',
-      apiKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.x6NrWBMMtPqcep5dNxOqjXT42sQhATAMdxEqVFDJKew',
+      apiKey: apiKey || QDRANT_API_KEY,
       timeout: 60000,
       checkCompatibility: false
     });
@@ -74,7 +78,8 @@ function isRelation(payload: Payload): payload is RelationPayload {
 
 export class QdrantPersistence {
   private client: CustomQdrantClient;
-  private openai: OpenAI;
+  private openai?: OpenAI;
+  private googleAI?: GoogleGenerativeAI;
   private initialized: boolean = false;
 
   constructor() {
@@ -90,11 +95,16 @@ export class QdrantPersistence {
       throw new Error("QDRANT_URL must start with http:// or https://");
     }
 
-    this.client = new CustomQdrantClient(QDRANT_URL);
+    this.client = new CustomQdrantClient(QDRANT_URL, QDRANT_API_KEY);
 
-    this.openai = new OpenAI({
-      apiKey: OPENAI_API_KEY,
-    });
+    // Initialize the appropriate embedding provider
+    if (EMBEDDING_PROVIDER === "openai") {
+      this.openai = new OpenAI({
+        apiKey: OPENAI_API_KEY,
+      });
+    } else if (EMBEDDING_PROVIDER === "google") {
+      this.googleAI = new GoogleGenerativeAI(GOOGLE_API_KEY!);
+    }
   }
 
   async connect() {
@@ -126,55 +136,74 @@ export class QdrantPersistence {
       }
     }
   }
-
+  
+    private getVectorSizeForModel(model: string): number {
+      // OpenAI models
+      if (model.includes("text-embedding-ada-002")) return 1536;
+      if (model.includes("text-embedding-3-small")) return 1536;
+      if (model.includes("text-embedding-3-large")) return 3072;
+      
+      // Google models
+      if (model.includes("text-embedding-004")) return 768;
+      if (model.includes("textembedding-gecko")) return 768;
+      
+      // Default fallback based on provider
+      if (EMBEDDING_PROVIDER === "openai") return 1536;
+      if (EMBEDDING_PROVIDER === "google") return 768;
+      
+      throw new Error(`Unknown vector size for model: ${model}. Please specify vector dimensions manually.`);
+    }
   async initialize() {
-    await this.connect();
-
-    if (!COLLECTION_NAME) {
-      throw new Error("COLLECTION_NAME environment variable is required");
+      await this.connect();
+  
+      if (!COLLECTION_NAME) {
+        throw new Error("COLLECTION_NAME environment variable is required");
+      }
+  
+      // Get vector size based on model
+    const requiredVectorSize = this.getVectorSizeForModel(FINAL_EMBEDDING_MODEL);
+  
+      try {
+        // Check if collection exists
+        const collections = await this.client.getCollections();
+        const collection = collections.collections.find(
+          (c) => c.name === COLLECTION_NAME
+        );
+  
+        if (!collection) {
+          await this.client.createCollection(COLLECTION_NAME, {
+            vectors: {
+              size: requiredVectorSize,
+              distance: "Cosine",
+            },
+          });
+          return;
+        }
+  
+        // Get collection info to check vector size
+        const collectionInfo = (await this.client.getCollection(
+          COLLECTION_NAME
+        )) as QdrantCollectionInfo;
+        const currentVectorSize = collectionInfo.config?.params?.vectors?.size;
+  
+        if (!currentVectorSize) {
+          await this.recreateCollection(requiredVectorSize);
+          return;
+        }
+  
+        if (currentVectorSize !== requiredVectorSize) {
+          console.log(`Vector size mismatch: current=${currentVectorSize}, required=${requiredVectorSize}. Recreating collection for ${EMBEDDING_PROVIDER} ${FINAL_EMBEDDING_MODEL} embeddings.`);
+          await this.recreateCollection(requiredVectorSize);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+        console.error("Failed to initialize collection:", message);
+        throw new Error(
+          `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
+        );
+      }
     }
 
-    const requiredVectorSize = 1536; // OpenAI embedding dimension
-
-    try {
-      // Check if collection exists
-      const collections = await this.client.getCollections();
-      const collection = collections.collections.find(
-        (c) => c.name === COLLECTION_NAME
-      );
-
-      if (!collection) {
-        await this.client.createCollection(COLLECTION_NAME, {
-          vectors: {
-            size: requiredVectorSize,
-            distance: "Cosine",
-          },
-        });
-        return;
-      }
-
-      // Get collection info to check vector size
-      const collectionInfo = (await this.client.getCollection(
-        COLLECTION_NAME
-      )) as QdrantCollectionInfo;
-      const currentVectorSize = collectionInfo.config?.params?.vectors?.size;
-
-      if (!currentVectorSize) {
-        await this.recreateCollection(requiredVectorSize);
-        return;
-      }
-
-      if (currentVectorSize !== requiredVectorSize) {
-        await this.recreateCollection(requiredVectorSize);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown Qdrant error";
-      console.error("Failed to initialize collection:", message);
-      throw new Error(
-        `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
-      );
-    }
-  }
 
   private async recreateCollection(vectorSize: number) {
     if (!COLLECTION_NAME) {
@@ -196,19 +225,34 @@ export class QdrantPersistence {
   }
 
   private async generateEmbedding(text: string) {
-    try {
-      const response = await this.openai.embeddings.create({
-        model: "text-embedding-ada-002",
-        input: text,
-      });
-      return response.data[0].embedding;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown OpenAI error";
-      console.error("OpenAI embedding error:", message);
-      throw new Error(`Failed to generate embeddings with OpenAI: ${message}`);
+      try {
+        if (EMBEDDING_PROVIDER === "openai") {
+          if (!this.openai) {
+            throw new Error("OpenAI client not initialized");
+          }
+          const response = await this.openai.embeddings.create({
+            model: FINAL_EMBEDDING_MODEL,
+            input: text,
+          });
+          return response.data[0].embedding;
+        } else if (EMBEDDING_PROVIDER === "google") {
+          if (!this.googleAI) {
+            throw new Error("Google AI client not initialized");
+          }
+          const model = this.googleAI.getGenerativeModel({ model: FINAL_EMBEDDING_MODEL });
+          const result = await model.embedContent(text);
+          return result.embedding.values;
+        } else {
+          throw new Error(`Unsupported embedding provider: ${EMBEDDING_PROVIDER}`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown embedding error";
+        console.error(`${EMBEDDING_PROVIDER} embedding error (${FINAL_EMBEDDING_MODEL}):`, message);
+        throw new Error(`Failed to generate embeddings with ${EMBEDDING_PROVIDER} ${FINAL_EMBEDDING_MODEL}: ${message}`);
+      }
     }
-  }
+
+
 
   private async hashString(str: string) {
     const hash = crypto.createHash("sha256");

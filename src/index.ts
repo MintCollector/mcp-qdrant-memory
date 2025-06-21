@@ -6,6 +6,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   McpError,
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -456,12 +458,14 @@ class MemoryServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
         },
       }
     );
 
     this.graphManager = new KnowledgeGraphManager();
     this.setupToolHandlers();
+    this.setupResourceHandlers();
   }
 
   private setupToolHandlers() {
@@ -469,7 +473,7 @@ class MemoryServer {
       tools: [
         {
           name: "create_entities",
-          description: "Create multiple new entities in the knowledge graph",
+          description: "Create multiple new entities in the knowledge graph. Use for adding facts, concepts, or learning patterns. Input: {entities: [{name: string, entityType: string, observations: string[], metadata?: object}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -494,7 +498,7 @@ class MemoryServer {
         },
         {
           name: "create_relations",
-          description: "Create multiple new relations between entities",
+          description: "Create relationships between existing entities. Use for connecting concepts, facts, or learning patterns. Input: {relations: [{from: string, to: string, relationType: string, metadata?: object}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -516,7 +520,7 @@ class MemoryServer {
         },
         {
           name: "add_observations",
-          description: "Add new observations to existing entities",
+          description: "Add new observations to existing entities. Use for updating knowledge or adding new insights. Input: {observations: [{entityName: string, contents: string[]}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -540,7 +544,7 @@ class MemoryServer {
         },
         {
           name: "delete_entities",
-          description: "Delete multiple entities and their relations",
+          description: "Delete entities and all their relationships. Use for removing outdated or incorrect information. Input: {entityNames: string[]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -554,7 +558,7 @@ class MemoryServer {
         },
         {
           name: "delete_observations",
-          description: "Delete specific observations from entities",
+          description: "Remove specific observations from entities. Use for correcting mistakes or removing outdated info. Input: {deletions: [{entityName: string, observations: string[]}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -578,7 +582,7 @@ class MemoryServer {
         },
         {
           name: "delete_relations",
-          description: "Delete multiple relations",
+          description: "Remove specific relationships between entities. Use for correcting connection errors. Input: {relations: [{from: string, to: string, relationType: string}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -600,7 +604,7 @@ class MemoryServer {
         },
         {
           name: "read_graph",
-          description: "Read the entire knowledge graph",
+          description: "Get the complete knowledge graph with all entities and relationships. Use for full graph inspection. Input: {} (no parameters)",
           inputSchema: {
             type: "object",
             properties: {}
@@ -608,7 +612,7 @@ class MemoryServer {
         },
         {
           name: "search_similar",
-          description: "Search for similar entities and relations using semantic search",
+          description: "Find semantically similar entities and relationships using AI embeddings. Use for discovering related concepts. Input: {query: string, limit?: number}",
           inputSchema: {
             type: "object",
             properties: {
@@ -623,7 +627,7 @@ class MemoryServer {
         },
         {
           name: "save_memories_with_relationships",
-          description: "Store multiple related memories and connections atomically",
+          description: "Store multiple related memories and connections atomically. Use for meta-learning patterns that connect to each other. Input: {memories: Array, relationships: Array}",
           inputSchema: {
             type: "object",
             properties: {
@@ -679,7 +683,7 @@ class MemoryServer {
         },
         {
           name: "batch_create_relationships",
-          description: "Create multiple relationships in one operation",
+          description: "Create multiple relationships efficiently in one operation. Use for connecting many entities at once. Input: {relationships: [{source_id: string, target_id: string, type: string, metadata?: object}]}",
           inputSchema: {
             type: "object",
             properties: {
@@ -710,7 +714,7 @@ class MemoryServer {
         },
         {
           name: "analyze_memory_connections",
-          description: "Analyze connection patterns for specific memory",
+          description: "Analyze connection patterns and relationship strength for a specific memory. Use for understanding knowledge clusters. Input: {memory_id: string}",
           inputSchema: {
             type: "object",
             properties: {
@@ -721,7 +725,7 @@ class MemoryServer {
         },
         {
           name: "get_relationships_by_type",
-          description: "Get all relationships of specific type",
+          description: "Retrieve all relationships of a specific type (validates, contradicts, builds_upon, etc.). Use for exploring relationship patterns. Input: {relationship_type: string}",
           inputSchema: {
             type: "object",
             properties: {
@@ -732,7 +736,7 @@ class MemoryServer {
         },
         {
           name: "find_relationship_chains",
-          description: "Discover relationship chains (A→B→C)",
+          description: "Discover relationship chains (A→B→C) to trace knowledge paths. Use for understanding learning progression. Input: {start_memory_id: string, max_depth: number}",
           inputSchema: {
             type: "object",
             properties: {
@@ -744,7 +748,7 @@ class MemoryServer {
         },
         {
           name: "search_with_filters",
-          description: "Enhanced search with type/date/relationship filters",
+          description: "Enhanced semantic search with filters for entity types, dates, domains, and tags. Use for targeted discovery. Input: {query: string, filters?: object, limit?: number}",
           inputSchema: {
             type: "object",
             properties: {
@@ -783,7 +787,7 @@ class MemoryServer {
         },
         {
           name: "hybrid_search",
-          description: "Vector similarity + graph traversal combined",
+          description: "Combines vector similarity search with graph traversal for comprehensive discovery. Use for complex knowledge exploration. Input: {query: string, relationship_paths?: string[], limit?: number, filters?: object}",
           inputSchema: {
             type: "object",
             properties: {
@@ -1018,8 +1022,370 @@ class MemoryServer {
       }
     });
   }
-
-  async run() {
+  
+    private setupResourceHandlers() {
+      // List available resources
+      this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+        return {
+          resources: [
+            {
+              uri: "memory://usage-guide",
+              name: "Memory System Usage Guide",
+              description: "Detailed prompting instructions for memory tools",
+              mimeType: "text/markdown"
+            },
+            {
+              uri: "memory://meta-learning-guide",
+              name: "Meta-Learning Tools Guide", 
+              description: "Advanced usage patterns for meta-learning functionality",
+              mimeType: "text/markdown"
+            },
+            {
+              uri: "memory://entity-types",
+              name: "Entity Types Reference",
+              description: "Complete reference for entity types and their usage",
+              mimeType: "text/markdown"
+            },
+            {
+              uri: "memory://relationship-types",
+              name: "Relationship Types Reference",
+              description: "Complete reference for relationship types and their usage",
+              mimeType: "text/markdown"
+            }
+          ]
+        };
+      });
+  
+      // Read specific resources
+      this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+        const uri = request.params.uri;
+  
+        switch (uri) {
+          case "memory://usage-guide":
+            return {
+              contents: [{
+                uri: request.params.uri,
+                mimeType: "text/markdown",
+                text: this.getUsageGuide()
+              }]
+            };
+  
+          case "memory://meta-learning-guide":
+            return {
+              contents: [{
+                uri: request.params.uri,
+                mimeType: "text/markdown", 
+                text: this.getMetaLearningGuide()
+              }]
+            };
+  
+          case "memory://entity-types":
+            return {
+              contents: [{
+                uri: request.params.uri,
+                mimeType: "text/markdown",
+                text: this.getEntityTypesReference()
+              }]
+            };
+  
+          case "memory://relationship-types":
+            return {
+              contents: [{
+                uri: request.params.uri,
+                mimeType: "text/markdown",
+                text: this.getRelationshipTypesReference()
+              }]
+            };
+  
+          default:
+            throw new McpError(
+              ErrorCode.InvalidParams,
+              `Unknown resource: ${uri}`
+            );
+        }
+      });
+    }
+    
+      private getUsageGuide(): string {
+        return `# Memory System Usage Guide
+    
+    ## Core Operations
+    
+    ### create_entities
+    **WHEN TO USE**: When storing new facts, concepts, or learning patterns
+    **INPUT FORMAT**: \`{entities: [{name: string, entityType: string, observations: string[], metadata?: object}]}\`
+    **BEST PRACTICES**:
+    - Use descriptive names that clearly identify the concept
+    - Choose appropriate entityType (meta_learning, principle, validation, failure_mode, general)
+    - Include rich observations with specific details
+    - Add metadata with tags, domain, and content for better searchability
+    
+    **EXAMPLE**:
+    \`\`\`json
+    {
+      "entities": [{
+        "name": "Spaced Repetition Principle",
+        "entityType": "principle", 
+        "observations": [
+          "Information is better retained when reviewed at increasing intervals",
+          "Optimal intervals: 1 day, 3 days, 1 week, 2 weeks, 1 month"
+        ],
+        "metadata": {
+          "domain": "learning_techniques",
+          "tags": ["memory", "retention", "intervals"],
+          "content": "Spaced repetition leverages the psychological spacing effect..."
+        }
+      }]
+    }
+    \`\`\`
+    
+    ### create_relations
+    **WHEN TO USE**: When connecting existing entities with meaningful relationships
+    **INPUT FORMAT**: \`{relations: [{from: string, to: string, relationType: string, metadata?: object}]}\`
+    **RELATIONSHIP TYPES**: validates, contradicts, builds_upon, connects_to, implements, derives_from
+    **BEST PRACTICES**:
+    - Ensure both entities exist before creating relations
+    - Use appropriate relationship types that reflect the actual connection
+    - Include strength scores (0.0-1.0) in metadata for importance
+    - Add context and evidence to support the relationship
+    
+    ### search_similar
+    **WHEN TO USE**: When exploring related concepts or discovering connections
+    **INPUT FORMAT**: \`{query: string, limit?: number}\`
+    **BEST PRACTICES**:
+    - Use natural language queries describing what you're looking for
+    - Start with broader queries and narrow down with filters
+    - Combine with other tools for comprehensive exploration
+    
+    ## Advanced Operations
+    
+    ### save_memories_with_relationships
+    **WHEN TO USE**: When storing complex meta-learning patterns with multiple interconnected pieces
+    **BEST PRACTICES**:
+    - Use for atomic operations that require consistency
+    - Group related memories that form a coherent learning pattern
+    - Include rich metadata for better future retrieval
+    
+    ### analyze_memory_connections
+    **WHEN TO USE**: When exploring how a specific concept relates to others
+    **OUTPUT**: Connection patterns, relationship types, strength metrics, and related clusters
+    
+    ### hybrid_search
+    **WHEN TO USE**: When you need both semantic similarity and relationship traversal
+    **BEST PRACTICES**:
+    - Specify relationship_paths to focus on specific connection types
+    - Use filters to narrow search scope
+    - Combine with connection analysis for comprehensive understanding
+    `;
+      }
+    
+      private getMetaLearningGuide(): string {
+        return `# Meta-Learning Tools Guide
+    
+    ## Meta-Learning Entity Types
+    
+    ### meta_learning
+    - **Purpose**: Core learning patterns and techniques
+    - **Examples**: "Active Retrieval Pattern", "Elaborative Interrogation Technique"
+    - **When to use**: For fundamental learning strategies that can be applied across domains
+    
+    ### principle
+    - **Purpose**: Fundamental learning principles backed by research
+    - **Examples**: "Spaced Repetition Principle", "Testing Effect Principle"
+    - **When to use**: For well-established learning laws and principles
+    
+    ### validation
+    - **Purpose**: Research evidence that supports or validates principles
+    - **Examples**: "Ebbinghaus Forgetting Curve Study", "Pashler Meta-Analysis"
+    - **When to use**: For empirical evidence and research findings
+    
+    ### failure_mode
+    - **Purpose**: Common learning mistakes and ineffective approaches
+    - **Examples**: "Cramming Failure Mode", "Highlighting Illusion"
+    - **When to use**: For documenting what doesn't work and why
+    
+    ## Advanced Workflow Patterns
+    
+    ### Pattern 1: Building Learning Hierarchies
+    1. Create principle entities for core concepts
+    2. Add validation entities with supporting research
+    3. Connect with "validates" relationships
+    4. Add failure_mode entities showing what contradicts the principle
+    5. Use "contradicts" relationships to link opposing evidence
+    
+    ### Pattern 2: Meta-Learning Discovery
+    1. Use \`hybrid_search\` with relationship_paths=["builds_upon", "validates"]
+    2. Analyze results with \`analyze_memory_connections\`
+    3. Find chains with \`find_relationship_chains\` to trace learning progressions
+    4. Create new connections based on discovered patterns
+    
+    ### Pattern 3: Knowledge Validation
+    1. Search for existing principles with \`search_with_filters\`
+    2. Get relationships by type: \`get_relationships_by_type\` with "validates"
+    3. Analyze strength of evidence using connection analysis
+    4. Add new validation or contradicting evidence as needed
+    
+    ## Relationship Strength Guidelines
+    
+    - **0.9-1.0**: Strong empirical evidence, multiple replications
+    - **0.7-0.8**: Good evidence, some limitations or context-dependence  
+    - **0.5-0.6**: Moderate evidence, mixed findings
+    - **0.3-0.4**: Weak evidence, preliminary or conflicting
+    - **0.1-0.2**: Very weak evidence, mostly theoretical
+    `;
+      }
+    
+      private getEntityTypesReference(): string {
+        return `# Entity Types Reference
+    
+    ## Meta-Learning Types
+    
+    ### meta_learning
+    - **Definition**: Core learning patterns, techniques, and strategies
+    - **Usage**: For fundamental learning approaches that can be applied across domains
+    - **Examples**: 
+      - "Active Retrieval Practice"
+      - "Elaborative Interrogation Technique"
+      - "Interleaving Strategy"
+    - **Metadata Tips**: Use domain tags like "cognitive_strategies", "memory_techniques"
+    
+    ### principle
+    - **Definition**: Well-established learning principles backed by research
+    - **Usage**: For fundamental learning laws and scientific principles
+    - **Examples**:
+      - "Spaced Repetition Principle"
+      - "Testing Effect Principle" 
+      - "Generation Effect"
+    - **Metadata Tips**: Include strength indicators and research domains
+    
+    ### validation
+    - **Definition**: Research evidence, studies, and empirical support
+    - **Usage**: For documenting scientific evidence that supports or refutes principles
+    - **Examples**:
+      - "Ebbinghaus Forgetting Curve Study"
+      - "Roediger Testing Effect Meta-Analysis"
+      - "Bjork Desirable Difficulties Research"
+    - **Metadata Tips**: Include study details, sample sizes, effect sizes
+    
+    ### failure_mode  
+    - **Definition**: Common learning mistakes and ineffective approaches
+    - **Usage**: For documenting what doesn't work and why
+    - **Examples**:
+      - "Cramming Failure Mode"
+      - "Highlighting Illusion"
+      - "Fluency Misattribution"
+    - **Metadata Tips**: Include why it fails and better alternatives
+    
+    ### general
+    - **Definition**: General purpose entities that don't fit other categories
+    - **Usage**: For concepts, facts, or patterns outside the meta-learning domain
+    - **Examples**:
+      - Domain-specific knowledge
+      - General facts or observations
+      - Contextual information
+    - **Metadata Tips**: Use clear domain and tag classification
+    
+    ## Best Practices
+    
+    1. **Choose the Right Type**: Match entity type to the nature of the knowledge
+    2. **Rich Observations**: Include specific, actionable details in observations
+    3. **Comprehensive Metadata**: Use all relevant metadata fields (tags, domain, content)
+    4. **Consistent Naming**: Use clear, descriptive names that avoid ambiguity
+    5. **Content Preservation**: Store exact content separately from interpreted observations
+    `;
+      }
+    
+      private getRelationshipTypesReference(): string {
+        return `# Relationship Types Reference
+    
+    ## Meta-Learning Relationship Types
+    
+    ### validates
+    - **Definition**: Evidence or research that supports a principle or pattern
+    - **Direction**: validation → principle/pattern
+    - **Strength**: Based on quality and quantity of evidence
+    - **Examples**:
+      - "Pashler Meta-Analysis" validates "Spaced Repetition Principle"
+      - "Roediger Studies" validates "Testing Effect Principle"
+    - **Metadata**: Include confidence level, study quality, replication status
+    
+    ### contradicts
+    - **Definition**: Evidence or patterns that oppose or contradict each other
+    - **Direction**: contradiction → target
+    - **Strength**: Based on strength of contradictory evidence
+    - **Examples**:
+      - "Cramming" contradicts "Spaced Repetition Principle"
+      - "Passive Reading" contradicts "Active Retrieval Pattern"
+    - **Metadata**: Include why contradiction exists, context dependencies
+    
+    ### builds_upon
+    - **Definition**: One concept extends or builds on another foundational concept
+    - **Direction**: advanced_concept → foundational_concept
+    - **Strength**: Based on how directly dependent the concepts are
+    - **Examples**:
+      - "Elaborative Interrogation" builds_upon "Active Retrieval"
+      - "Spaced Testing" builds_upon "Testing Effect"
+    - **Metadata**: Include how the extension works, added value
+    
+    ### connects_to
+    - **Definition**: General connections between related concepts
+    - **Direction**: concept1 ↔ concept2 (bidirectional)
+    - **Strength**: Based on closeness of relationship
+    - **Examples**:
+      - "Memory Palace" connects_to "Elaborative Encoding"
+      - "Metacognition" connects_to "Self-Testing"
+    - **Metadata**: Include nature of connection, context
+    
+    ### implements
+    - **Definition**: Practical application or implementation of a principle
+    - **Direction**: implementation → principle
+    - **Strength**: Based on how faithfully it implements the principle
+    - **Examples**:
+      - "Anki Algorithm" implements "Spaced Repetition Principle"
+      - "Practice Testing" implements "Testing Effect"
+    - **Metadata**: Include implementation details, effectiveness
+    
+    ### derives_from
+    - **Definition**: Logical derivation or theoretical development from another concept
+    - **Direction**: derived_concept → source_concept
+    - **Strength**: Based on logical rigor and directness
+    - **Examples**:
+      - "Optimal Review Intervals" derives_from "Forgetting Curve"
+      - "Difficulty Desirability" derives_from "Transfer Appropriate Processing"
+    - **Metadata**: Include derivation logic, theoretical basis
+    
+    ## Relationship Strength Guidelines
+    
+    ### Evidence-Based Strength (validates, contradicts)
+    - **0.9-1.0**: Multiple high-quality studies, strong effect sizes, consistent replication
+    - **0.7-0.8**: Good evidence with some limitations or context dependencies
+    - **0.5-0.6**: Moderate evidence, mixed findings, or limited scope
+    - **0.3-0.4**: Weak evidence, preliminary findings, or contradictory results
+    - **0.1-0.2**: Very weak evidence, mostly theoretical or anecdotal
+    
+    ### Conceptual Strength (builds_upon, derives_from, implements)
+    - **0.9-1.0**: Direct, essential dependency; cannot exist without foundation
+    - **0.7-0.8**: Strong relationship with clear logical connection
+    - **0.5-0.6**: Moderate relationship, some independence possible
+    - **0.3-0.4**: Weak relationship, mostly tangential connection
+    - **0.1-0.2**: Very weak relationship, minor or disputed connection
+    
+    ## Usage Patterns
+    
+    ### Building Knowledge Hierarchies
+    1. Start with foundational principles
+    2. Add validating evidence with "validates" relationships
+    3. Connect related concepts with "connects_to"
+    4. Show implementations with "implements" relationships
+    5. Document contradictions and failure modes
+    
+    ### Tracing Learning Progressions
+    1. Use "builds_upon" to show concept development
+    2. Use "derives_from" to show theoretical development
+    3. Chain relationships to trace knowledge evolution
+    4. Analyze chains to understand learning pathways
+    `;
+      }  async run() {
     try {
       await this.graphManager.initialize();
       const transport = new StdioServerTransport();

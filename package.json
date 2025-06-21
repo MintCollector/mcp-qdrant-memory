@@ -19,6 +19,7 @@
     "watch": "tsc --watch"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.0.1",
     "@qdrant/js-client-rest": "^1.13.0",
     "axios": "^1.8.1",
