@@ -223,15 +223,36 @@ export class QdrantPersistence {
       throw new Error("COLLECTION_NAME environment variable is required");
     }
 
-    const text = `${entity.name} (${
-      entity.entityType
-    }): ${entity.observations.join(". ")}`;
+    // Enhanced text generation for better embeddings
+    let text = `${entity.name} (${entity.entityType}): ${entity.observations.join(". ")}`;
+    
+    // Include metadata content if available
+    if (entity.metadata?.content) {
+      text += ` Content: ${entity.metadata.content}`;
+    }
+    
+    // Include domain and tags for better context
+    if (entity.metadata?.domain) {
+      text += ` Domain: ${entity.metadata.domain}`;
+    }
+    
+    if (entity.metadata?.tags?.length) {
+      text += ` Tags: ${entity.metadata.tags.join(", ")}`;
+    }
+
     const vector = await this.generateEmbedding(text);
-    const id = await this.hashString(entity.name);
+    const id = await this.hashString(entity.metadata?.id || entity.name);
 
     const payload = {
       type: "entity",
       ...entity,
+      // Ensure metadata is properly included
+      metadata: entity.metadata ? {
+        ...entity.metadata,
+        created_at: entity.metadata.created_at || new Date().toISOString()
+      } : {
+        created_at: new Date().toISOString()
+      }
     };
 
     await this.client.upsert(COLLECTION_NAME, {
@@ -251,7 +272,18 @@ export class QdrantPersistence {
       throw new Error("COLLECTION_NAME environment variable is required");
     }
 
-    const text = `${relation.from} ${relation.relationType} ${relation.to}`;
+    // Enhanced text generation for relations
+    let text = `${relation.from} ${relation.relationType} ${relation.to}`;
+    
+    // Include context and evidence if available
+    if (relation.metadata?.context) {
+      text += ` Context: ${relation.metadata.context}`;
+    }
+    
+    if (relation.metadata?.evidence?.length) {
+      text += ` Evidence: ${relation.metadata.evidence.join(". ")}`;
+    }
+
     const vector = await this.generateEmbedding(text);
     const id = await this.hashString(
       `${relation.from}-${relation.relationType}-${relation.to}`
@@ -260,6 +292,13 @@ export class QdrantPersistence {
     const payload = {
       type: "relation",
       ...relation,
+      // Ensure metadata is properly included
+      metadata: relation.metadata ? {
+        ...relation.metadata,
+        created_at: relation.metadata.created_at || new Date().toISOString()
+      } : {
+        created_at: new Date().toISOString()
+      }
     };
 
     await this.client.upsert(COLLECTION_NAME, {
@@ -330,5 +369,218 @@ export class QdrantPersistence {
     await this.client.delete(COLLECTION_NAME, {
       points: [id],
     });
+  }
+
+  // Batch operations for meta-learning
+  async batchPersistEntities(entities: Entity[]) {
+    await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required");
+    }
+
+    const points = [];
+    for (const entity of entities) {
+      // Enhanced text generation for better embeddings
+      let text = `${entity.name} (${entity.entityType}): ${entity.observations.join(". ")}`;
+      
+      if (entity.metadata?.content) {
+        text += ` Content: ${entity.metadata.content}`;
+      }
+      
+      if (entity.metadata?.domain) {
+        text += ` Domain: ${entity.metadata.domain}`;
+      }
+      
+      if (entity.metadata?.tags?.length) {
+        text += ` Tags: ${entity.metadata.tags.join(", ")}`;
+      }
+
+      const vector = await this.generateEmbedding(text);
+      const id = await this.hashString(entity.metadata?.id || entity.name);
+
+      points.push({
+        id,
+        vector,
+        payload: {
+          type: "entity",
+          ...entity,
+          metadata: entity.metadata ? {
+            ...entity.metadata,
+            created_at: entity.metadata.created_at || new Date().toISOString()
+          } : {
+            created_at: new Date().toISOString()
+          }
+        } as Record<string, unknown>
+      });
+    }
+
+    await this.client.upsert(COLLECTION_NAME, { points });
+  }
+
+  async batchPersistRelations(relations: Relation[]) {
+    await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required");
+    }
+
+    const points = [];
+    for (const relation of relations) {
+      let text = `${relation.from} ${relation.relationType} ${relation.to}`;
+      
+      if (relation.metadata?.context) {
+        text += ` Context: ${relation.metadata.context}`;
+      }
+      
+      if (relation.metadata?.evidence?.length) {
+        text += ` Evidence: ${relation.metadata.evidence.join(". ")}`;
+      }
+
+      const vector = await this.generateEmbedding(text);
+      const id = await this.hashString(
+        `${relation.from}-${relation.relationType}-${relation.to}`
+      );
+
+      points.push({
+        id,
+        vector,
+        payload: {
+          type: "relation",
+          ...relation,
+          metadata: relation.metadata ? {
+            ...relation.metadata,
+            created_at: relation.metadata.created_at || new Date().toISOString()
+          } : {
+            created_at: new Date().toISOString()
+          }
+        } as Record<string, unknown>
+      });
+    }
+
+    await this.client.upsert(COLLECTION_NAME, { points });
+  }
+
+  // Enhanced search with filters
+  async searchWithFilters(query: string, filters?: any, limit: number = 10) {
+    await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required");
+    }
+
+    const queryVector = await this.generateEmbedding(query);
+    
+    // Build Qdrant filter conditions
+    const filterConditions: any = {};
+    
+    if (filters) {
+      const mustConditions: any[] = [];
+      
+      if (filters.entity_types?.length) {
+        mustConditions.push({
+          key: "entityType",
+          match: {
+            any: filters.entity_types
+          }
+        });
+      }
+      
+      if (filters.domains?.length) {
+        mustConditions.push({
+          key: "metadata.domain",
+          match: {
+            any: filters.domains
+          }
+        });
+      }
+      
+      if (filters.tags?.length) {
+        mustConditions.push({
+          key: "metadata.tags",
+          match: {
+            any: filters.tags
+          }
+        });
+      }
+      
+      if (filters.date_range) {
+        mustConditions.push({
+          key: "metadata.created_at",
+          range: {
+            gte: filters.date_range.start,
+            lte: filters.date_range.end
+          }
+        });
+      }
+      
+      if (mustConditions.length > 0) {
+        filterConditions.must = mustConditions;
+      }
+    }
+
+    const searchParams: any = {
+      vector: queryVector,
+      limit,
+      with_payload: true
+    };
+    
+    if (Object.keys(filterConditions).length > 0) {
+      searchParams.filter = filterConditions;
+    }
+
+    const results = await this.client.search(COLLECTION_NAME, searchParams);
+
+    const validResults: Array<Entity | Relation> = [];
+    for (const result of results) {
+      if (!result.payload) continue;
+
+      const payload = result.payload as unknown as Payload;
+
+      if (isEntity(payload)) {
+        const { type, ...entity } = payload;
+        validResults.push(entity);
+      } else if (isRelation(payload)) {
+        const { type, ...relation } = payload;
+        validResults.push(relation);
+      }
+    }
+
+    return validResults;
+  }
+
+  // Get relationships by type
+  async getRelationshipsByType(relationshipType: string, limit: number = 100) {
+    await this.connect();
+    if (!COLLECTION_NAME) {
+      throw new Error("COLLECTION_NAME environment variable is required");
+    }
+
+    const results = await this.client.scroll(COLLECTION_NAME, {
+      filter: {
+        must: [
+          {
+            key: "type",
+            match: { value: "relation" }
+          },
+          {
+            key: "relationType",
+            match: { value: relationshipType }
+          }
+        ]
+      },
+      limit,
+      with_payload: true
+    });
+
+    const relationships: Relation[] = [];
+    for (const result of results.points) {
+      if (!result.payload) continue;
+      
+      const payload = result.payload as unknown as Payload;
+      if (isRelation(payload)) {
+        const { type, ...relation } = payload;
+        relationships.push(relation);
+      }
+    }
+
+    return relationships;
   }
 }
