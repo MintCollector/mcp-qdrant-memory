@@ -1,14 +1,15 @@
-// Entity types (8 core types)
+// Entity types (9 core types)
 export const ENTITY_TYPES = [
-  'person',      // People, individuals, characters
-  'concept',     // Abstract ideas, theories, principles
-  'event',       // Historical events, occurrences, incidents
-  'location',    // Places, geographical entities
-  'organization', // Companies, institutions, groups
-  'document',    // Books, papers, articles, records
-  'technology',  // Tools, systems, platforms, software
-  'process'      // Methods, procedures, workflows
-] as const;
+               'person',       // People, individuals, characters, historical figures
+               'organization', // Companies, institutions, groups, teams
+               'location',     // Places, geographical entities, venues, virtual spaces
+               'event',        // Temporal interactions, events, meetings, milestones
+               'concept',      // Abstract ideas, theories, principles, mental models
+               'workflow',     // Methods, procedures, workflows, algorithms, processes
+               'object',       // Documents, products, tools, resources, assets, financial instruments
+               'task',         // Objectives, projects, assignments
+               'preferences'   // User choices, configurations, behavioral patterns
+             ] as const;
 
 export type EntityType = typeof ENTITY_TYPES[number];
 

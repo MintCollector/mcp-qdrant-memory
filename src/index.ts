@@ -122,7 +122,7 @@ class MemoryServer {
       tools: [
         {
           name: "create_entities",
-          description: "Create multiple new entities in the knowledge graph. Use for adding facts, concepts, people, places, organizations, documents, technologies, and processes. Input: {entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}. Entity types: person, concept, event, location, organization, document, technology, process. Custom types also supported.",
+          description: "Create multiple new entities in the knowledge graph. Use for adding people, organizations, locations, events, concepts, workflows, objects, tasks, and preferences. Input: {entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}. Entity types: person, organization, location, event, concept, workflow, object, task, preferences. Custom types also supported.",
           inputSchema: {
             type: "object",
             properties: {
@@ -437,25 +437,13 @@ class MemoryServer {
             {
               uri: "memory://usage-guide",
               name: "Memory System Usage Guide",
-              description: "Detailed prompting instructions for memory tools",
+              description: "Complete guide for using memory tools with examples and patterns",
               mimeType: "text/markdown"
             },
             {
-              uri: "memory://advanced-usage-guide",
-              name: "Advanced Usage Guide", 
-              description: "Multi-type entities and advanced knowledge graph patterns",
-              mimeType: "text/markdown"
-            },
-            {
-              uri: "memory://entity-types",
-              name: "Entity Types Reference",
-              description: "Complete reference for entity types and their usage",
-              mimeType: "text/markdown"
-            },
-            {
-              uri: "memory://relationship-types",
-              name: "Relationship Types Reference",
-              description: "Complete reference for relationship types and their usage",
+              uri: "memory://types-reference",
+              name: "Types Reference",
+              description: "Complete reference for entity and relationship types",
               mimeType: "text/markdown"
             }
           ]
@@ -476,30 +464,12 @@ class MemoryServer {
               }]
             };
   
-          case "memory://advanced-usage-guide":
-            return {
-              contents: [{
-                uri: request.params.uri,
-                mimeType: "text/markdown", 
-                text: this.getAdvancedUsageGuide()
-              }]
-            };
-  
-          case "memory://entity-types":
+          case "memory://types-reference":
             return {
               contents: [{
                 uri: request.params.uri,
                 mimeType: "text/markdown",
-                text: this.getEntityTypesReference()
-              }]
-            };
-  
-          case "memory://relationship-types":
-            return {
-              contents: [{
-                uri: request.params.uri,
-                mimeType: "text/markdown",
-                text: this.getRelationshipTypesReference()
+                text: this.getTypesReference()
               }]
             };
   
@@ -521,7 +491,7 @@ class MemoryServer {
 **PURPOSE**: Store new knowledge, facts, concepts, or learning patterns
 **INPUT**: \`{entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}\`
 
-**ENTITY TYPES**: Choose from 8 core types (person, concept, event, location, organization, document, technology, process). Custom types also supported.
+**ENTITY TYPES**: Choose from 9 core types (person, organization, location, event, concept, workflow, object, task, preferences). Custom types also supported.
 
 **SINGLE TYPE EXAMPLE**:
 \`\`\`json
@@ -546,7 +516,7 @@ class MemoryServer {
 {
   "entities": [{
     "name": "Docker",
-    "entityType": ["technology", "process"],
+    "entityType": ["object", "workflow"],
     "observations": [
       "Containerization platform for applications",
       "Standard deployment and development workflow"
@@ -562,17 +532,17 @@ class MemoryServer {
 ### 2. create_relationships
 **PURPOSE**: Connect existing entities with meaningful relationships
 **INPUT**: \`{relationships: [{from: string, to: string, relationType: string, metadata?: object}]}\`
-**RELATIONSHIP TYPES**: validates, contradicts, builds_upon, connects_to, implements, derives_from
+**RELATIONSHIP TYPES**: relates_to, part_of, creates, uses, influences, depends_on, similar_to, opposite_of
 **EXAMPLE**:
 \`\`\`json
 {
   "relationships": [{
-    "from": "Ebbinghaus Study",
-    "to": "Spaced Repetition Principle", 
-    "relationType": "validates",
+    "from": "Einstein",
+    "to": "Theory of Relativity", 
+    "relationType": "creates",
     "metadata": {
       "strength": 0.9,
-      "context": "Empirical evidence from memory experiments"
+      "context": "Einstein developed the theory of relativity"
     }
   }]
 }
@@ -588,14 +558,6 @@ class MemoryServer {
 **PURPOSE**: Find connected entities via knowledge graph relationships (traverses graph structure)
 **INPUT**: \`{entityName: string, maxDepth?: number, relationshipTypes?: string[]}\`
 **BEST FOR**: Understanding how concepts connect, finding relationship chains
-**EXAMPLE**:
-\`\`\`json
-{
-  "entityName": "Spaced Repetition Principle",
-  "maxDepth": 2,
-  "relationshipTypes": ["validates", "builds_upon"]
-}
-\`\`\`
 
 ## Management Tools
 
@@ -619,6 +581,26 @@ class MemoryServer {
 **PURPOSE**: Remove specific relationships between entities
 **INPUT**: \`{relationships: [{from: string, to: string, relationType: string}]}\`
 
+## Multi-Type Entity Strategy
+
+### Common Multi-Type Combinations
+
+#### person + concept
+- **Use**: For influential thinkers whose ideas are concepts themselves
+- **Example**: ["person", "concept"] for "Albert Einstein" (both the person and his conceptual contributions)
+
+#### object + workflow  
+- **Use**: For tools that are also methodologies
+- **Example**: ["object", "workflow"] for "Docker" (both software and deployment methodology)
+
+#### object + event
+- **Use**: For important publications that are also historical events
+- **Example**: ["object", "event"] for "Declaration of Independence"
+
+#### organization + location
+- **Use**: For institutions tied to specific places
+- **Example**: ["organization", "location"] for "MIT"
+
 ## Search Strategy Guide
 
 ### When to use semantic_search vs search_related:
@@ -633,395 +615,136 @@ class MemoryServer {
 `;
       }
     
-      private getAdvancedUsageGuide(): string {
-        return `# Advanced Usage Guide
-
-## Overview
-Use the 9 core tools to build rich knowledge graphs. The system supports 8 entity types with full multi-type functionality for complex knowledge representation.
-
-## Multi-Type Entity Strategy
-
-### Common Multi-Type Combinations
-
-#### person + concept
-- **Use**: For influential thinkers whose ideas are concepts themselves
-- **Example**: ["person", "concept"] for "Albert Einstein" (both the person and his conceptual contributions)
-
-#### technology + process  
-- **Use**: For tools that are also methodologies
-- **Example**: ["technology", "process"] for "Docker" (both software and deployment methodology)
-
-#### document + event
-- **Use**: For important publications that are also historical events
-- **Example**: ["document", "event"] for "Declaration of Independence" (both a document and historical event)
-
-#### organization + location
-- **Use**: For institutions tied to specific places
-- **Example**: ["organization", "location"] for "MIT" (both an institution and a place)
-
-### Single Entity Types
-
-#### person
-- **Purpose**: People, individuals, characters, historical figures
-- **Examples**: "Marie Curie", "John Doe", "Shakespeare"
-- **Best for**: When the focus is on the individual rather than their ideas
-
-#### concept
-- **Purpose**: Abstract ideas, theories, principles, mental models
-- **Examples**: "Democracy", "Machine Learning", "Supply and Demand"
-- **Best for**: Theoretical or abstract knowledge
-
-#### event
-- **Purpose**: Historical events, occurrences, incidents, milestones
-- **Examples**: "World War II", "2008 Financial Crisis", "Product Launch"
-- **Best for**: Time-bound occurrences
-
-#### location
-- **Purpose**: Places, geographical entities, venues, virtual spaces
-- **Examples**: "New York City", "Office Building", "Cloud Infrastructure"
-- **Best for**: Physical or virtual places
-
-#### organization
-- **Purpose**: Companies, institutions, groups, teams
-- **Examples**: "Microsoft", "Harvard University", "Development Team"
-- **Best for**: Structured groups of people
-
-#### document
-- **Purpose**: Books, papers, articles, records, files
-- **Examples**: "Research Paper", "User Manual", "Meeting Notes"
-- **Best for**: Information artifacts
-
-#### technology
-- **Purpose**: Tools, systems, platforms, software
-- **Examples**: "Kubernetes", "Neural Networks", "Programming Language"
-- **Best for**: Technical tools and systems
-
-#### process
-- **Purpose**: Methods, procedures, workflows, algorithms
-- **Examples**: "Code Review Process", "Scientific Method", "Customer Onboarding"
-- **Best for**: Systematic approaches and procedures
-
-## Relationship Types
-
-### relates_to
-- **Purpose**: General connection between entities
-- **Example**: "Einstein" relates_to "Theory of Relativity"
-
-### part_of
-- **Purpose**: Hierarchical relationship (component → container)
-- **Example**: "Marketing Team" part_of "Sales Organization"
-
-### creates
-- **Purpose**: Creation or authorship relationship
-- **Example**: "Shakespeare" creates "Romeo and Juliet"
-
-### uses
-- **Purpose**: Usage or dependency relationship
-- **Example**: "Development Team" uses "Docker"
-
-### influences
-- **Purpose**: Impact or influence relationship
-- **Example**: "Einstein" influences "Modern Physics"
-
-### depends_on
-- **Purpose**: Dependency relationship
-- **Example**: "Frontend Application" depends_on "Backend API"
-
-### similar_to
-- **Purpose**: Similarity relationship
-- **Example**: "Docker" similar_to "Podman"
-
-### opposite_of
-- **Purpose**: Opposition or contrast relationship
-- **Example**: "Centralized System" opposite_of "Decentralized System"
-
-## Workflow Patterns
-
-### Pattern 1: Building Knowledge Networks
-1. **create_entities**: Add core concepts as single types
-2. **create_entities**: Add related people, documents, technologies
-3. **create_relationships**: Connect with appropriate relationship types
-4. **search_related**: Explore connections
-
-### Pattern 2: Multi-Type Entity Modeling
-1. **create_entities**: Use multi-type entities for complex concepts
-2. **add_observations**: Enrich with detailed information
-3. **semantic_search**: Find similar multi-faceted entities
-4. **create_relationships**: Connect different aspects
-
-### Pattern 3: Domain Knowledge Mapping
-1. **create_entities**: Map domain concepts, people, tools
-2. **create_relationships**: Show how they interact
-3. **read_graph**: Get complete domain picture
-4. **add_observations**: Update with new insights
-
-## Example: Complete Workflow with Multi-Types
-
-\`\`\`json
-// 1. Create multi-type entity
-{
-  "entities": [{
-    "name": "Docker",
-    "entityType": ["technology", "process"],
-    "observations": [
-      "Containerization platform for applications",
-      "Standard deployment methodology in DevOps"
-    ]
-  }]
-}
-
-// 2. Add supporting entities
-{
-  "entities": [
-    {
-      "name": "Kubernetes",
-      "entityType": "technology", 
-      "observations": ["Container orchestration platform"]
-    },
-    {
-      "name": "DevOps Team",
-      "entityType": "organization",
-      "observations": ["Team responsible for deployment infrastructure"]
-    }
-  ]
-}
-
-// 3. Create relationships
-{
-  "relationships": [
-    {
-      "from": "Kubernetes",
-      "to": "Docker",
-      "relationType": "uses"
-    },
-    {
-      "from": "DevOps Team", 
-      "to": "Docker",
-      "relationType": "uses"
-    }
-  ]
-}
-\`\`\`
-`;
+      private getTypesReference(): string {
+        return `# Types Reference
+      
+      ## Entity Types (9 Core Types)
+      
+      ### person
+      - **Purpose**: People, individuals, characters, historical figures
+      - **Examples**: "Albert Einstein", "Marie Curie", "John Smith"
+      - **Multi-type example**: ["person", "concept"] for influential thinkers
+      - **When to use**: For any individual human being, real or fictional
+      
+      ### organization
+      - **Purpose**: Companies, institutions, groups, teams
+      - **Examples**: "Microsoft", "Harvard University", "Development Team"
+      - **Multi-type example**: ["organization", "object"] for tech companies
+      - **When to use**: For structured groups of people
+      
+      ### location
+      - **Purpose**: Places, geographical entities, venues, virtual spaces
+      - **Examples**: "New York City", "Office Building", "Cloud Infrastructure"
+      - **Multi-type example**: ["location", "organization"] for corporate headquarters
+      - **When to use**: For physical or virtual places
+      
+      ### event
+      - **Purpose**: Temporal interactions, Historical events, occurrences, incidents, milestones, calendar appointments, meetings
+      - **Examples**: "World War II", "2008 Financial Crisis", "Product Launch", "Team Meeting"
+      - **Multi-type example**: ["event", "workflow"] for procedural events
+      - **When to use**: For time-bound occurrences or happenings
+      
+      ### concept
+      - **Purpose**: Abstract ideas, theories, principles, mental models
+      - **Examples**: "Democracy", "Machine Learning", "Supply and Demand"
+      - **Multi-type example**: ["concept", "workflow"] for methodological concepts
+      - **When to use**: For theoretical or abstract knowledge
+      
+      ### workflow
+      - **Purpose**: Methods, procedures, workflows, algorithms, processes
+      - **Examples**: "Code Review Process", "Scientific Method", "Customer Onboarding"
+      - **Multi-type example**: ["workflow", "object"] for automated processes
+      - **When to use**: For systematic approaches and procedures
+      
+      ### object
+      - **Purpose**: Documents, products, tools, resources, assets, financial instruments
+      - **Examples**: "Research Paper", "Docker", "Financial Report", "API Documentation"
+      - **Multi-type example**: ["object", "concept"] for knowledge artifacts
+      - **When to use**: For concrete items and their relationships
+      
+      ### task
+      - **Purpose**: Objectives, projects, assignments
+      - **Examples**: "Complete Project Alpha", "Review Code", "Schedule Meeting"
+      - **Multi-type example**: ["task", "event"] for scheduled assignments
+      - **When to use**: Things worth recording with status, priority, deadline, dependencies. Enables procedural memory and goal tracking
+      
+      ### preferences
+      - **Purpose**: User choices, configurations, behavioral patterns, report formatting, likes, dislikes
+      - **Examples**: "Dark Mode Setting", "Notification Preferences", "Preferred Meeting Times"
+      - **Multi-type example**: ["preferences", "object"] for configuration files
+      - **When to use**: Maintains personalization state and user behavior patterns
+      
+      ## Relationship Types (8 Core Types)
+      
+      ### relates_to
+      - **Purpose**: General connection between entities
+      - **Direction**: bidirectional (entity_a ↔ entity_b)
+      - **When to use**: For general relationships that don't fit other specific categories
+      - **Example**: "Einstein" relates_to "Theory of Relativity"
+      
+      ### part_of  
+      - **Purpose**: Hierarchical relationship (component is part of container)
+      - **Direction**: component → container
+      - **When to use**: When one entity is a component or subset of another
+      - **Example**: "Marketing Team" part_of "Sales Organization"
+      
+      ### creates
+      - **Purpose**: Creation, authorship, or origination relationship
+      - **Direction**: creator → created_entity
+      - **When to use**: When one entity brings another into existence
+      - **Example**: "Shakespeare" creates "Romeo and Juliet"
+      
+      ### uses
+      - **Purpose**: Usage, utilization, or dependency relationship
+      - **Direction**: user → used_entity
+      - **When to use**: When one entity utilizes or depends on another
+      - **Example**: "Development Team" uses "Docker"
+      
+      ### influences
+      - **Purpose**: Impact, influence, or effect relationship
+      - **Direction**: influencer → influenced_entity
+      - **When to use**: When one entity affects or impacts another
+      - **Example**: "Einstein" influences "Modern Physics"
+      
+      ### depends_on
+      - **Purpose**: Strong dependency relationship
+      - **Direction**: dependent → dependency
+      - **When to use**: When one entity cannot function without another
+      - **Example**: "Frontend Application" depends_on "Backend API"
+      
+      ### similar_to
+      - **Purpose**: Similarity or comparison relationship
+      - **Direction**: bidirectional (entity_a ↔ entity_b)
+      - **When to use**: When entities share characteristics or serve similar purposes
+      - **Example**: "Docker" similar_to "Podman"
+      
+      ### opposite_of
+      - **Purpose**: Opposition, contrast, or antithetical relationship
+      - **Direction**: bidirectional (entity_a ↔ entity_b)
+      - **When to use**: When entities represent opposing concepts or approaches
+      - **Example**: "Centralized System" opposite_of "Decentralized System"
+      
+      ## Type Selection Guide
+      
+      **If it's a person or individual** → person
+      **If it's a group or institution** → organization
+      **If it's a place or location** → location
+      **If it's a time-bound occurrence** → event
+      **If it's an abstract idea or theory** → concept
+      **If it's a method or procedure** → workflow
+      **If it's a concrete item or artifact** → object
+      **If it's an objective or assignment** → task
+      **If it's a user choice or setting** → preferences
+      
+      **For complex entities**: Use multiple types like ["person", "concept"] for influential thinkers
+      
+      ## Custom Types
+      Additional custom types can be added beyond the 9 core types when needed for domain-specific use cases.
+      `;
       }
-    
-      private getEntityTypesReference(): string {
-        return `# Entity Types Reference
 
-## Available Entity Types
 
-### Entity Types (8 Core Types)
-
-#### person
-- **Purpose**: People, individuals, characters, historical figures
-- **Examples**: "Albert Einstein", "Marie Curie", "John Smith"
-- **Multi-type example**: ["person", "concept"] for influential thinkers
-- **When to use**: For any individual human being, real or fictional
-
-#### concept
-- **Purpose**: Abstract ideas, theories, principles, mental models
-- **Examples**: "Democracy", "Machine Learning", "Supply and Demand"
-- **Multi-type example**: ["concept", "process"] for methodological concepts
-- **When to use**: For theoretical or abstract knowledge
-
-#### event
-- **Purpose**: Historical events, occurrences, incidents, milestones
-- **Examples**: "World War II", "2008 Financial Crisis", "Product Launch"
-- **Multi-type example**: ["event", "process"] for procedural events
-- **When to use**: For time-bound occurrences or happenings
-
-#### location
-- **Purpose**: Places, geographical entities, venues, virtual spaces
-- **Examples**: "New York City", "Office Building", "Cloud Infrastructure"
-- **Multi-type example**: ["location", "organization"] for corporate headquarters
-- **When to use**: For physical or virtual places
-
-#### organization
-- **Purpose**: Companies, institutions, groups, teams
-- **Examples**: "Microsoft", "Harvard University", "Development Team"
-- **Multi-type example**: ["organization", "technology"] for tech companies
-- **When to use**: For structured groups of people
-
-#### document
-- **Purpose**: Books, papers, articles, records, files
-- **Examples**: "Research Paper", "User Manual", "Meeting Notes"
-- **Multi-type example**: ["document", "event"] for historic documents
-- **When to use**: For information artifacts and written materials
-
-#### technology
-- **Purpose**: Tools, systems, platforms, software, methodologies
-- **Examples**: "Docker", "Neural Networks", "Agile Methodology"
-- **Multi-type example**: ["technology", "process"] for systematic tools
-- **When to use**: For technical tools, systems, and platforms
-
-#### process
-- **Purpose**: Methods, procedures, workflows, algorithms
-- **Examples**: "Code Review Process", "Scientific Method", "Customer Onboarding"
-- **Multi-type example**: ["process", "technology"] for automated processes
-- **When to use**: For systematic approaches and procedures
-
-### Multiple Entity Types
-Entities can have multiple types for richer categorization:
-\`\`\`json
-{
-  "name": "Docker",
-  "entityType": ["technology", "process"],
-  "observations": ["Containerization platform and deployment methodology"]
-}
-\`\`\`
-
-### Custom Types
-Additional custom types can be added beyond the 8 core types when needed for domain-specific use cases.
-
-## Best Practices
-
-### Naming Conventions
-- Use clear, descriptive names: "Spaced Repetition Principle" not "Spacing"
-- Be specific: "Ebbinghaus 1885 Forgetting Curve Study" not "Memory Study"
-- Include key identifiers when relevant: "Roediger Butler 2011 Meta-Analysis"
-
-### Observations
-- Include specific, actionable details
-- Use concrete examples and measurable outcomes
-- Provide context for application
-- Reference original sources when applicable
-
-### Metadata
-- **domain**: Learning area (e.g., "cognitive_psychology", "educational_methods")
-- **tags**: Relevant keywords for discoverability
-- **content**: Preserve exact original content
-- **created_at**: Timestamp for tracking
-- **id**: Unique identifier (auto-generated)
-
-## Entity Type Selection Guide
-
-**If it's a person or individual** → person
-**If it's an abstract idea or theory** → concept  
-**If it's a time-bound occurrence** → event
-**If it's a place or location** → location
-**If it's a group or institution** → organization
-**If it's written material or artifact** → document
-**If it's a tool or system** → technology
-**If it's a method or procedure** → process
-
-**For complex entities**: Use multiple types like ["person", "concept"] for influential thinkers
-`;
-      }
-    
-      private getRelationshipTypesReference(): string {
-        return `# Relationship Types Reference
-
-## Available Relationship Types
-
-### relates_to
-- **Purpose**: General connection between entities
-- **Direction**: bidirectional (entity_a ↔ entity_b)
-- **When to use**: For general relationships that don't fit other specific categories
-- **Example**: "Einstein" relates_to "Theory of Relativity"
-- **Metadata**: Include nature of connection, context
-
-### part_of  
-- **Purpose**: Hierarchical relationship (component is part of container)
-- **Direction**: component → container
-- **When to use**: When one entity is a component or subset of another
-- **Example**: "Marketing Team" part_of "Sales Organization"
-- **Metadata**: Include hierarchical context, percentage if relevant
-
-### creates
-- **Purpose**: Creation, authorship, or origination relationship
-- **Direction**: creator → created_entity
-- **When to use**: When one entity brings another into existence
-- **Example**: "Shakespeare" creates "Romeo and Juliet"
-- **Metadata**: Include creation date, context, method
-
-### uses
-- **Purpose**: Usage, utilization, or dependency relationship
-- **Direction**: user → used_entity
-- **When to use**: When one entity utilizes or depends on another
-- **Example**: "Development Team" uses "Docker"
-- **Metadata**: Include usage context, frequency, purpose
-
-### influences
-- **Purpose**: Impact, influence, or effect relationship
-- **Direction**: influencer → influenced_entity
-- **When to use**: When one entity affects or impacts another
-- **Example**: "Einstein" influences "Modern Physics"
-- **Metadata**: Include type of influence, degree, timeframe
-
-### depends_on
-- **Purpose**: Strong dependency relationship
-- **Direction**: dependent → dependency
-- **When to use**: When one entity cannot function without another
-- **Example**: "Frontend Application" depends_on "Backend API"
-- **Metadata**: Include criticality, type of dependency
-
-### similar_to
-- **Purpose**: Similarity or comparison relationship
-- **Direction**: bidirectional (entity_a ↔ entity_b)
-- **When to use**: When entities share characteristics or serve similar purposes
-- **Example**: "Docker" similar_to "Podman"
-- **Metadata**: Include similarities, differences, comparison criteria
-
-### opposite_of
-- **Purpose**: Opposition, contrast, or antithetical relationship
-- **Direction**: bidirectional (entity_a ↔ entity_b)
-- **When to use**: When entities represent opposing concepts or approaches
-- **Example**: "Centralized System" opposite_of "Decentralized System"
-- **Metadata**: Include nature of opposition, context
-
-## Strength Guidelines
-
-### 0.9-1.0: Very Strong
-- Multiple high-quality studies
-- Consistent replication
-- Strong theoretical basis
-
-### 0.7-0.8: Strong  
-- Good empirical support
-- Some replication
-- Clear logical connection
-
-### 0.5-0.6: Moderate
-- Limited evidence
-- Some theoretical support
-- Contextual relationship
-
-### 0.3-0.4: Weak
-- Minimal evidence
-- Speculative connection
-- Context-dependent
-
-## Best Practices
-
-### Choosing Relationship Types
-1. **Start specific**: Use validates, contradicts, implements when applicable
-2. **Fall back to general**: Use connects_to for unclear relationships
-3. **Consider direction**: Most relationships have a natural direction
-4. **Check existing**: Use search_related to see existing relationship patterns
-
-### Setting Strength Scores
-- Base on evidence quality, not personal opinion
-- Consider replication and sample sizes
-- Account for context dependencies
-- Update as new evidence emerges
-
-### Metadata Guidelines
-- **strength**: 0.0-1.0 numerical score
-- **context**: Why this relationship exists
-- **evidence**: Supporting facts or studies
-- **created_at**: Timestamp
-- **confidence**: Your confidence in this relationship
-
-## Relationship Selection Guide
-
-**Strong empirical support** → validates
-**Clear opposition/contradiction** → contradicts  
-**Technique puts principle into practice** → implements
-**Advanced builds on basic** → builds_upon
-**Logical development** → derives_from
-**General connection** → connects_to
-`;
-      }  async run() {
+  async run() {
     try {
       await this.graphManager.initialize();
       const transport = new StdioServerTransport();
