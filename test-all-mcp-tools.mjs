@@ -463,12 +463,12 @@ class MCPTestSuite {
 
       const results = JSON.parse(response.result.content[0].text);
       
-      if (!Array.isArray(results)) {
-        throw new Error("Expected array of related entities");
+      if (!results.entities || !Array.isArray(results.entities) || !results.relationships || !Array.isArray(results.relationships) || !results.paths || !Array.isArray(results.paths)) {
+        throw new Error("Expected object with entities, relationships, and paths arrays");
       }
 
-      console.log(`✅ search_related found ${results.length} related entities`);
-      this.testResults.push({ test: 'search_related', status: 'PASS', results: results.length });
+      console.log(`✅ search_related found ${results.entities.length} entities, ${results.relationships.length} relationships, and ${results.paths.length} paths`);
+      this.testResults.push({ test: 'search_related', status: 'PASS', entities: results.entities.length, relationships: results.relationships.length, paths: results.paths.length });
       return true;
     } catch (error) {
       console.error(`❌ search_related failed: ${error.message}`);

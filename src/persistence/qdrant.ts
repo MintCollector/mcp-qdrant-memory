@@ -393,10 +393,6 @@ export class QdrantPersistence {
         vector: queryVector,
         limit,
         with_payload: true,
-        // Use 3x oversampling for better accuracy with binary quantization
-        params: {
-          oversampling: 3.0,
-        },
         // Optional score threshold for filtering low-confidence results
         ...(scoreThreshold && { score_threshold: scoreThreshold }),
       });
@@ -554,41 +550,23 @@ export class QdrantPersistence {
         const mustConditions: any[] = [];
         
         if (filters.entity_types?.length) {
-          // Handle both single entity types and arrays
-          mustConditions.push({
-            key: "entityType",
-            match: {
-              any: filters.entity_types
-            }
-          });
+          // TODO: entityType filtering requires an index in Qdrant
+          // For now, we'll filter the results after retrieval
+          console.warn("Entity type filtering is currently not supported in Qdrant queries");
         }
         
+        // TODO: All metadata filtering requires indexes in Qdrant
+        // For now, we'll filter all results after retrieval
         if (filters.domains?.length) {
-          mustConditions.push({
-            key: "metadata.domain",
-            match: {
-              any: filters.domains
-            }
-          });
+          console.warn("Domain filtering will be applied post-retrieval");
         }
         
         if (filters.tags?.length) {
-          mustConditions.push({
-            key: "metadata.tags",
-            match: {
-              any: filters.tags
-            }
-          });
+          console.warn("Tag filtering will be applied post-retrieval");
         }
         
         if (filters.date_range) {
-          mustConditions.push({
-            key: "metadata.created_at",
-            range: {
-              gte: filters.date_range.start,
-              lte: filters.date_range.end
-            }
-          });
+          console.warn("Date range filtering will be applied post-retrieval");
         }
         
         if (mustConditions.length > 0) {
@@ -600,10 +578,6 @@ export class QdrantPersistence {
         vector: queryVector,
         limit,
         with_payload: true,
-        // Use 3x oversampling for better accuracy with binary quantization
-        params: {
-          oversampling: 3.0,
-        },
         // Optional score threshold for filtering low-confidence results
         ...(scoreThreshold && { score_threshold: scoreThreshold }),
       };
@@ -612,7 +586,14 @@ export class QdrantPersistence {
         searchParams.filter = filterConditions;
       }
   
-      const results = await this.client.search(COLLECTION_NAME, searchParams);
+      let results;
+      try {
+        results = await this.client.search(COLLECTION_NAME, searchParams);
+      } catch (searchError) {
+        console.error("Qdrant search error:", searchError);
+        console.error("Search params:", JSON.stringify(searchParams, null, 2));
+        throw searchError;
+      }
   
       const validResults: Array<Entity | Relation> = [];
       for (const result of results) {
@@ -622,6 +603,44 @@ export class QdrantPersistence {
   
         if (isEntity(payload)) {
           const { type, ...entity } = payload;
+          
+          // Post-retrieval filtering for entity types if needed
+          if (filters?.entity_types?.length) {
+            const entityTypes = Array.isArray(entity.entityType) ? entity.entityType : [entity.entityType];
+            const hasMatchingType = filters.entity_types.some(filterType => 
+              entityTypes.includes(filterType)
+            );
+            if (!hasMatchingType) continue;
+          }
+          
+          // Post-retrieval filtering for domains
+          if (filters?.domains?.length) {
+            if (!entity.metadata?.domain || !filters.domains.includes(entity.metadata.domain)) {
+              continue;
+            }
+          }
+          
+          // Post-retrieval filtering for tags
+          if (filters?.tags?.length) {
+            if (!entity.metadata?.tags || !filters.tags.some(tag => entity.metadata!.tags!.includes(tag))) {
+              continue;
+            }
+          }
+          
+          // Post-retrieval filtering for date range
+          if (filters?.date_range) {
+            const createdAt = entity.metadata?.created_at;
+            if (!createdAt) continue;
+            
+            const entityDate = new Date(createdAt).getTime();
+            const startDate = new Date(filters.date_range.start).getTime();
+            const endDate = new Date(filters.date_range.end).getTime();
+            
+            if (entityDate < startDate || entityDate > endDate) {
+              continue;
+            }
+          }
+          
           validResults.push(entity);
         } else if (isRelation(payload)) {
           const { type, ...relation } = payload;

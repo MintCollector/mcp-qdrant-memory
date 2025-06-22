@@ -365,95 +365,97 @@ export class Neo4jPersistence {
   }
 
   async searchRelated(entityName: string, maxDepth: number = 2, relationshipTypes?: string[]): Promise<{
-    entities: Entity[];
-    relationships: Relation[];
-    paths: Array<{
-      path: string[];
-      depth: number;
-    }>;
-  }> {
-    const session = this.driver!.session({ database: this.database });
-    try {
-      // Build the Cypher query with optional relationship type filtering
-      let relationshipFilter = '';
-      if (relationshipTypes && relationshipTypes.length > 0) {
-        relationshipFilter = `WHERE r.relationType IN $relationshipTypes`;
-      }
-
-      const query = `
-        MATCH path = (start:Entity {name: $entityName})-[r:RELATES_TO*1..${maxDepth}]-(connected:Entity)
-        ${relationshipFilter}
-        RETURN path,
-               nodes(path) as pathNodes,
-               relationships(path) as pathRelationships,
-               length(path) as depth
-        ORDER BY depth
-      `;
-
-      const result = await session.run(query, {
-        entityName,
-        relationshipTypes: relationshipTypes || []
-      });
-
-      const entitiesSet = new Set<string>();
-      const relationshipsMap = new Map<string, Relation>();
-      const paths: Array<{ path: string[]; depth: number }> = [];
-
-      // Process results
-      for (const record of result.records) {
-        const pathNodes = record.get('pathNodes');
-        const pathRelationships = record.get('pathRelationships');
-        const depth = record.get('depth');
-
-        // Extract path
-        const pathNames = pathNodes.map((node: any) => node.properties.name);
-        paths.push({ path: pathNames, depth });
-
-        // Collect entities
-        pathNodes.forEach((node: any) => {
-          entitiesSet.add(node.properties.name);
-        });
-
-        // Collect relationships
-        pathRelationships.forEach((rel: any, index: number) => {
-          const fromNode = pathNodes[index];
-          const toNode = pathNodes[index + 1];
-          const key = `${fromNode.properties.name}-${rel.properties.relationType}-${toNode.properties.name}`;
-          
-          relationshipsMap.set(key, {
-            from: fromNode.properties.name,
-            to: toNode.properties.name,
-            relationType: rel.properties.relationType,
-            metadata: rel.properties.metadata || {}
+      entities: Entity[];
+      relationships: Relation[];
+      paths: Array<{
+        path: string[];
+        depth: number;
+      }>;
+    }> {
+      const session = this.driver!.session({ database: this.database });
+      try {
+        // Build the Cypher query with optional relationship type filtering
+        let relationshipFilter = '';
+        let queryParams: any = { entityName };
+        
+        if (relationshipTypes && relationshipTypes.length > 0) {
+          // For variable-length paths, r is a list of relationships, so we need to check all relationships in the path
+          relationshipFilter = `WHERE ALL(rel IN r WHERE rel.relationType IN $relationshipTypes)`;
+          queryParams.relationshipTypes = relationshipTypes;
+        }
+  
+        const query = `
+          MATCH path = (start:Entity {name: $entityName})-[r:RELATES_TO*1..${maxDepth}]-(connected:Entity)
+          ${relationshipFilter}
+          RETURN path,
+                 nodes(path) as pathNodes,
+                 relationships(path) as pathRelationships,
+                 length(path) as depth
+          ORDER BY depth
+        `;
+  
+        const result = await session.run(query, queryParams);
+  
+        const entitiesSet = new Set<string>();
+        const relationshipsMap = new Map<string, Relation>();
+        const paths: Array<{ path: string[]; depth: number }> = [];
+  
+        // Process results
+        for (const record of result.records) {
+          const pathNodes = record.get('pathNodes');
+          const pathRelationships = record.get('pathRelationships');
+          const depth = record.get('depth');
+  
+          // Extract path
+          const pathNames = pathNodes.map((node: any) => node.properties.name);
+          paths.push({ path: pathNames, depth });
+  
+          // Collect entities
+          pathNodes.forEach((node: any) => {
+            entitiesSet.add(node.properties.name);
           });
-        });
+  
+          // Collect relationships
+          pathRelationships.forEach((rel: any, index: number) => {
+            const fromNode = pathNodes[index];
+            const toNode = pathNodes[index + 1];
+            const key = `${fromNode.properties.name}-${rel.properties.relationType}-${toNode.properties.name}`;
+            
+            relationshipsMap.set(key, {
+              from: fromNode.properties.name,
+              to: toNode.properties.name,
+              relationType: rel.properties.relationType,
+              metadata: rel.properties.metadata || {}
+            });
+          });
+        }
+  
+        // Get full entity details
+        const entityNames = Array.from(entitiesSet);
+        const entitiesResult = await session.run(`
+          MATCH (e:Entity)
+          WHERE e.name IN $names
+          RETURN e.name as name,
+                 e.entityType as entityType,
+                 e.observations as observations,
+                 e.metadata as metadata
+        `, { names: entityNames });
+  
+        const entities: Entity[] = entitiesResult.records.map(record => ({
+          name: record.get('name'),
+          entityType: record.get('entityType'),
+          observations: record.get('observations') || [],
+          metadata: record.get('metadata') || {}
+        }));
+  
+        const relationships = Array.from(relationshipsMap.values());
+  
+        return { entities, relationships, paths };
+      } finally {
+        await session.close();
       }
-
-      // Get full entity details
-      const entityNames = Array.from(entitiesSet);
-      const entitiesResult = await session.run(`
-        MATCH (e:Entity)
-        WHERE e.name IN $names
-        RETURN e.name as name,
-               e.entityType as entityType,
-               e.observations as observations,
-               e.metadata as metadata
-      `, { names: entityNames });
-
-      const entities: Entity[] = entitiesResult.records.map(record => ({
-        name: record.get('name'),
-        entityType: record.get('entityType'),
-        observations: record.get('observations') || [],
-        metadata: record.get('metadata') || {}
-      }));
-
-      const relationships = Array.from(relationshipsMap.values());
-
-      return { entities, relationships, paths };
-    } finally {
-      await session.close();
     }
-  }
+
 
   // Advanced Neo4j-specific query methods
   async executeCustomQuery(cypher: string, parameters: Record<string, any> = {}): Promise<any[]> {
