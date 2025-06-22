@@ -58,10 +58,18 @@ interface RelationPayload extends Relation {
 type Payload = EntityPayload | RelationPayload;
 
 function isEntity(payload: Payload): payload is EntityPayload {
+  // Check entityType is either string or string array
+  const isValidEntityType = (
+    typeof payload.entityType === 'string' ||
+    (Array.isArray(payload.entityType) && 
+     payload.entityType.length > 0 &&
+     payload.entityType.every(type => typeof type === 'string'))
+  );
+  
   return (
     payload.type === "entity" &&
     typeof payload.name === "string" &&
-    typeof payload.entityType === "string" &&
+    isValidEntityType &&
     Array.isArray(payload.observations) &&
     payload.observations.every((obs: unknown) => typeof obs === "string")
   );
@@ -268,7 +276,10 @@ export class QdrantPersistence {
     }
 
     // Enhanced text generation for better embeddings
-    let text = `${entity.name} (${entity.entityType}): ${entity.observations.join(". ")}`;
+    const entityTypes = Array.isArray(entity.entityType) 
+      ? entity.entityType.join(", ") 
+      : entity.entityType;
+    let text = `${entity.name} (${entityTypes}): ${entity.observations.join(". ")}`;
     
     // Include metadata content if available
     if (entity.metadata?.content) {
@@ -425,7 +436,10 @@ export class QdrantPersistence {
     const points = [];
     for (const entity of entities) {
       // Enhanced text generation for better embeddings
-      let text = `${entity.name} (${entity.entityType}): ${entity.observations.join(". ")}`;
+      const entityTypes = Array.isArray(entity.entityType) 
+        ? entity.entityType.join(", ") 
+        : entity.entityType;
+      let text = `${entity.name} (${entityTypes}): ${entity.observations.join(". ")}`;
       
       if (entity.metadata?.content) {
         text += ` Content: ${entity.metadata.content}`;

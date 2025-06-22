@@ -50,6 +50,33 @@ if (!COLLECTION_NAME) {
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 // Note: QDRANT_API_KEY is optional, so we don't check if it exists
 
+// Neo4j configuration
+const PERSISTENCE_TYPE = process.env.PERSISTENCE_TYPE || "json"; // "json" or "neo4j"
+const NEO4J_URI = process.env.NEO4J_URI;
+const NEO4J_USER = process.env.NEO4J_USER;
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD;
+const NEO4J_DATABASE = process.env.NEO4J_DATABASE;
+
+// Validate Neo4j configuration if selected
+if (PERSISTENCE_TYPE === "neo4j") {
+  const missingVars = [];
+  if (!NEO4J_URI) missingVars.push("NEO4J_URI");
+  if (!NEO4J_USER) missingVars.push("NEO4J_USER");
+  if (!NEO4J_PASSWORD) missingVars.push("NEO4J_PASSWORD");
+  
+  if (missingVars.length > 0) {
+    console.error(`Error: Missing required Neo4j environment variables: ${missingVars.join(", ")}`);
+    console.error("When using PERSISTENCE_TYPE=neo4j, you must provide:");
+    console.error("  NEO4J_URI=bolt://localhost:7687");
+    console.error("  NEO4J_USER=neo4j");
+    console.error("  NEO4J_PASSWORD=your-password");
+    console.error("  NEO4J_DATABASE=neo4j (optional)");
+    console.error("");
+    console.error("To use JSON persistence instead, set PERSISTENCE_TYPE=json or remove it entirely.");
+    process.exit(1);
+  }
+}
+
 export { 
   EMBEDDING_PROVIDER,
   FINAL_EMBEDDING_MODEL,
@@ -57,5 +84,10 @@ export {
   GOOGLE_API_KEY,
   QDRANT_URL, 
   COLLECTION_NAME, 
-  QDRANT_API_KEY 
+  QDRANT_API_KEY,
+  PERSISTENCE_TYPE,
+  NEO4J_URI,
+  NEO4J_USER,
+  NEO4J_PASSWORD,
+  NEO4J_DATABASE
 };

@@ -11,10 +11,7 @@ import {
   McpError,
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
-import { promises as fs } from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { QdrantPersistence } from './persistence/qdrant.js';
+import { HybridPersistence } from './persistence/factory.js';
 import { 
   Entity, 
   Relation, 
@@ -33,136 +30,49 @@ import {
 
 } from './validation.js';
 
-// Define paths
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MEMORY_FILE_PATH = path.join(__dirname, 'memory.json');
-
 class KnowledgeGraphManager {
-  private graph: KnowledgeGraph;
-  private qdrant: QdrantPersistence;
+  private persistence: HybridPersistence;
 
   constructor() {
-    this.graph = { entities: [], relations: [] };
-    this.qdrant = new QdrantPersistence();
+    this.persistence = new HybridPersistence();
   }
 
   async initialize(): Promise<void> {
-    try {
-      const data = await fs.readFile(MEMORY_FILE_PATH, 'utf-8');
-      const parsedData = JSON.parse(data);
-      // Ensure entities have observations array
-      this.graph = {
-        entities: parsedData.entities.map((e: Entity) => ({
-          ...e,
-          observations: e.observations || []
-        })),
-        relations: parsedData.relations || []
-      };
-    } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-        // If file doesn't exist, use empty graph
-        this.graph = { entities: [], relations: [] };
-      } else {
-        // Re-throw unexpected errors
-        throw new Error(`Failed to initialize graph: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    await this.qdrant.initialize();
-  }
-
-  async save(): Promise<void> {
-    await fs.writeFile(MEMORY_FILE_PATH, JSON.stringify(this.graph, null, 2));
+    await this.persistence.initialize();
   }
 
   async addEntities(entities: Entity[]): Promise<void> {
-    for (const entity of entities) {
-      const existingIndex = this.graph.entities.findIndex((e: Entity) => e.name === entity.name);
-      if (existingIndex !== -1) {
-        this.graph.entities[existingIndex] = entity;
-      } else {
-        this.graph.entities.push(entity);
-      }
-      await this.qdrant.persistEntity(entity);
-    }
-    await this.save();
+    await this.persistence.addEntities(entities);
   }
 
   async addRelations(relations: Relation[]): Promise<void> {
-    for (const relation of relations) {
-      if (!this.graph.entities.some(e => e.name === relation.from)) {
-        throw new Error(`Entity not found: ${relation.from}`);
-      }
-      if (!this.graph.entities.some(e => e.name === relation.to)) {
-        throw new Error(`Entity not found: ${relation.to}`);
-      }
-      const existingIndex = this.graph.relations.findIndex(
-        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
-      );
-      if (existingIndex !== -1) {
-        this.graph.relations[existingIndex] = relation;
-      } else {
-        this.graph.relations.push(relation);
-      }
-      await this.qdrant.persistRelation(relation);
-    }
-    await this.save();
+    await this.persistence.addRelations(relations);
   }
 
   async addObservations(entityName: string, observations: string[]): Promise<void> {
-    const entity = this.graph.entities.find((e: Entity) => e.name === entityName);
-    if (!entity) {
-      throw new Error(`Entity not found: ${entityName}`);
-    }
-    entity.observations.push(...observations);
-    await this.qdrant.persistEntity(entity);
-    await this.save();
+    await this.persistence.addObservations(entityName, observations);
   }
 
   async deleteEntities(entityNames: string[]): Promise<void> {
-    for (const name of entityNames) {
-      const index = this.graph.entities.findIndex((e: Entity) => e.name === name);
-      if (index !== -1) {
-        this.graph.entities.splice(index, 1);
-        this.graph.relations = this.graph.relations.filter(
-          (r: Relation) => r.from !== name && r.to !== name
-        );
-        await this.qdrant.deleteEntity(name);
-      }
-    }
-    await this.save();
+    await this.persistence.deleteEntities(entityNames);
   }
 
   async deleteObservations(entityName: string, observations: string[]): Promise<void> {
-    const entity = this.graph.entities.find((e: Entity) => e.name === entityName);
-    if (!entity) {
-      throw new Error(`Entity not found: ${entityName}`);
-    }
-    entity.observations = entity.observations.filter((o: string) => !observations.includes(o));
-    await this.qdrant.persistEntity(entity);
-    await this.save();
+    await this.persistence.deleteObservations(entityName, observations);
   }
 
   async deleteRelations(relations: Relation[]): Promise<void> {
-    for (const relation of relations) {
-      const index = this.graph.relations.findIndex(
-        (r: Relation) => r.from === relation.from && r.to === relation.to && r.relationType === relation.relationType
-      );
-      if (index !== -1) {
-        this.graph.relations.splice(index, 1);
-        await this.qdrant.deleteRelation(relation);
-      }
-    }
-    await this.save();
+    await this.persistence.deleteRelations(relations);
   }
 
-  getGraph(): KnowledgeGraph {
-    return this.graph;
+  async getGraph(): Promise<KnowledgeGraph> {
+    return this.persistence.getGraph();
   }
 
   async searchSimilar(query: string, limit: number = 10): Promise<Array<Entity | Relation>> {
     // Ensure limit is a positive number
     const validLimit = Math.max(1, Math.min(limit, 100)); // Cap at 100 results
-    return await this.qdrant.searchSimilar(query, validLimit);
+    return await this.persistence.searchSimilar(query, validLimit);
   }
 
   async searchRelated(entityName: string, maxDepth: number = 2, relationshipTypes?: string[]): Promise<{
@@ -173,69 +83,7 @@ class KnowledgeGraphManager {
       depth: number;
     }>;
   }> {
-    // Find the starting entity
-    const startEntity = this.graph.entities.find(e => e.name === entityName);
-    if (!startEntity) {
-      throw new Error(`Entity not found: ${entityName}`);
-    }
-
-    const relatedEntities = new Set<string>();
-    const relatedRelationships: Relation[] = [];
-    const paths: Array<{ path: string[]; depth: number }> = [];
-    const visited = new Set<string>();
-
-    // Recursive function to traverse the graph
-    const traverse = (currentEntity: string, currentPath: string[], depth: number) => {
-      if (depth > maxDepth || visited.has(currentEntity)) {
-        return;
-      }
-
-      visited.add(currentEntity);
-      relatedEntities.add(currentEntity);
-
-      if (depth > 0) {
-        paths.push({ path: [...currentPath], depth });
-      }
-
-      // Find all relationships involving this entity
-      const entityRelations = this.graph.relations.filter(r => {
-        const isConnected = r.from === currentEntity || r.to === currentEntity;
-        const typeMatches = !relationshipTypes || relationshipTypes.includes(r.relationType);
-        return isConnected && typeMatches;
-      });
-
-      for (const relation of entityRelations) {
-        // Add the relationship to results
-        relatedRelationships.push(relation);
-
-        // Get the connected entity
-        const connectedEntity = relation.from === currentEntity ? relation.to : relation.from;
-        
-        // Continue traversal if within depth limit
-        if (depth < maxDepth && !visited.has(connectedEntity)) {
-          traverse(connectedEntity, [...currentPath, connectedEntity], depth + 1);
-        } else if (!relatedEntities.has(connectedEntity)) {
-          relatedEntities.add(connectedEntity);
-        }
-      }
-    };
-
-    // Start traversal from the given entity
-    traverse(entityName, [entityName], 0);
-
-    // Get full entity objects for all related entities
-    const entities = this.graph.entities.filter(e => relatedEntities.has(e.name));
-
-    // Remove duplicates from relationships
-    const uniqueRelationships = Array.from(
-      new Map(relatedRelationships.map(r => [`${r.from}-${r.relationType}-${r.to}`, r])).values()
-    );
-
-    return {
-      entities,
-      relationships: uniqueRelationships,
-      paths
-    };
+    return this.persistence.searchRelated(entityName, maxDepth, relationshipTypes);
   }
 }
 
@@ -274,7 +122,7 @@ class MemoryServer {
       tools: [
         {
           name: "create_entities",
-          description: "Create multiple new entities in the knowledge graph. Use for adding facts, concepts, or learning patterns. Input: {entities: [{name: string, entityType: string, observations: string[], metadata?: object}]}",
+          description: "Create multiple new entities in the knowledge graph. Use for adding facts, concepts, people, places, organizations, documents, technologies, and processes. Input: {entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}. Entity types: person, concept, event, location, organization, document, technology, process. Custom types also supported.",
           inputSchema: {
             type: "object",
             properties: {
@@ -284,7 +132,16 @@ class MemoryServer {
                   type: "object",
                   properties: {
                     name: { type: "string" },
-                    entityType: { type: "string" },
+                    entityType: { 
+                      oneOf: [
+                        { type: "string" },
+                        { 
+                          type: "array",
+                          items: { type: "string" },
+                          minItems: 1
+                        }
+                      ]
+                    },
                     observations: {
                       type: "array",
                       items: { type: "string" }
@@ -512,15 +369,17 @@ class MemoryServer {
             };
           }
 
-          case "read_graph":
+          case "read_graph": {
+            const graph = await this.graphManager.getGraph();
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(this.graphManager.getGraph(), null, 2),
+                  text: JSON.stringify(graph, null, 2),
                 },
               ],
             };
+          }
 
           case "semantic_search": {
             const args = validateSemanticSearchRequest(request.params.arguments);
@@ -582,9 +441,9 @@ class MemoryServer {
               mimeType: "text/markdown"
             },
             {
-              uri: "memory://meta-learning-guide",
-              name: "Meta-Learning Tools Guide", 
-              description: "Advanced usage patterns for meta-learning functionality",
+              uri: "memory://advanced-usage-guide",
+              name: "Advanced Usage Guide", 
+              description: "Multi-type entities and advanced knowledge graph patterns",
               mimeType: "text/markdown"
             },
             {
@@ -617,12 +476,12 @@ class MemoryServer {
               }]
             };
   
-          case "memory://meta-learning-guide":
+          case "memory://advanced-usage-guide":
             return {
               contents: [{
                 uri: request.params.uri,
                 mimeType: "text/markdown", 
-                text: this.getMetaLearningGuide()
+                text: this.getAdvancedUsageGuide()
               }]
             };
   
@@ -655,283 +514,513 @@ class MemoryServer {
     
       private getUsageGuide(): string {
         return `# Memory System Usage Guide
-    
-    ## Core Operations
-    
-    ### create_entities
-    **WHEN TO USE**: When storing new facts, concepts, or learning patterns
-    **INPUT FORMAT**: \`{entities: [{name: string, entityType: string, observations: string[], metadata?: object}]}\`
-    **BEST PRACTICES**:
-    - Use descriptive names that clearly identify the concept
-    - Choose appropriate entityType (meta_learning, principle, validation, failure_mode, general)
-    - Include rich observations with specific details
-    - Add metadata with tags, domain, and content for better searchability
-    
-    **EXAMPLE**:
-    \`\`\`json
-    {
-      "entities": [{
-        "name": "Spaced Repetition Principle",
-        "entityType": "principle", 
-        "observations": [
-          "Information is better retained when reviewed at increasing intervals",
-          "Optimal intervals: 1 day, 3 days, 1 week, 2 weeks, 1 month"
-        ],
-        "metadata": {
-          "domain": "learning_techniques",
-          "tags": ["memory", "retention", "intervals"],
-          "content": "Spaced repetition leverages the psychological spacing effect..."
-        }
-      }]
+
+## Quick Start - Essential Tools
+
+### 1. create_entities
+**PURPOSE**: Store new knowledge, facts, concepts, or learning patterns
+**INPUT**: \`{entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}\`
+
+**ENTITY TYPES**: Choose from 8 core types (person, concept, event, location, organization, document, technology, process). Custom types also supported.
+
+**SINGLE TYPE EXAMPLE**:
+\`\`\`json
+{
+  "entities": [{
+    "name": "Albert Einstein",
+    "entityType": "person",
+    "observations": [
+      "Theoretical physicist who developed relativity theory",
+      "Nobel Prize winner in Physics (1921)"
+    ],
+    "metadata": {
+      "domain": "science",
+      "tags": ["physics", "relativity", "nobel_prize"]
     }
-    \`\`\`
-    
-    ### create_relations
-    **WHEN TO USE**: When connecting existing entities with meaningful relationships
-    **INPUT FORMAT**: \`{relations: [{from: string, to: string, relationType: string, metadata?: object}]}\`
-    **RELATIONSHIP TYPES**: validates, contradicts, builds_upon, connects_to, implements, derives_from
-    **BEST PRACTICES**:
-    - Ensure both entities exist before creating relations
-    - Use appropriate relationship types that reflect the actual connection
-    - Include strength scores (0.0-1.0) in metadata for importance
-    - Add context and evidence to support the relationship
-    
-    ### search_similar
-    **WHEN TO USE**: When exploring related concepts or discovering connections
-    **INPUT FORMAT**: \`{query: string, limit?: number}\`
-    **BEST PRACTICES**:
-    - Use natural language queries describing what you're looking for
-    - Start with broader queries and narrow down with filters
-    - Combine with other tools for comprehensive exploration
-    
-    ## Advanced Operations
-    
-    ### save_memories_with_relationships
-    **WHEN TO USE**: When storing complex meta-learning patterns with multiple interconnected pieces
-    **BEST PRACTICES**:
-    - Use for atomic operations that require consistency
-    - Group related memories that form a coherent learning pattern
-    - Include rich metadata for better future retrieval
-    
-    ### analyze_memory_connections
-    **WHEN TO USE**: When exploring how a specific concept relates to others
-    **OUTPUT**: Connection patterns, relationship types, strength metrics, and related clusters
-    
-    ### hybrid_search
-    **WHEN TO USE**: When you need both semantic similarity and relationship traversal
-    **BEST PRACTICES**:
-    - Specify relationship_paths to focus on specific connection types
-    - Use filters to narrow search scope
-    - Combine with connection analysis for comprehensive understanding
-    `;
+  }]
+}
+\`\`\`
+
+**MULTIPLE TYPES EXAMPLE**:
+\`\`\`json
+{
+  "entities": [{
+    "name": "Docker",
+    "entityType": ["technology", "process"],
+    "observations": [
+      "Containerization platform for applications",
+      "Standard deployment and development workflow"
+    ],
+    "metadata": {
+      "domain": "software_development",
+      "tags": ["containers", "devops", "deployment"]
+    }
+  }]
+}
+\`\`\`
+
+### 2. create_relationships
+**PURPOSE**: Connect existing entities with meaningful relationships
+**INPUT**: \`{relationships: [{from: string, to: string, relationType: string, metadata?: object}]}\`
+**RELATIONSHIP TYPES**: validates, contradicts, builds_upon, connects_to, implements, derives_from
+**EXAMPLE**:
+\`\`\`json
+{
+  "relationships": [{
+    "from": "Ebbinghaus Study",
+    "to": "Spaced Repetition Principle", 
+    "relationType": "validates",
+    "metadata": {
+      "strength": 0.9,
+      "context": "Empirical evidence from memory experiments"
+    }
+  }]
+}
+\`\`\`
+
+### 3. semantic_search
+**PURPOSE**: Find semantically similar content using AI embeddings (searches vector database)
+**INPUT**: \`{query: string, limit?: number}\`
+**BEST FOR**: Discovering related concepts, exploring similar ideas
+**EXAMPLE**: "memory techniques for better learning"
+
+### 4. search_related
+**PURPOSE**: Find connected entities via knowledge graph relationships (traverses graph structure)
+**INPUT**: \`{entityName: string, maxDepth?: number, relationshipTypes?: string[]}\`
+**BEST FOR**: Understanding how concepts connect, finding relationship chains
+**EXAMPLE**:
+\`\`\`json
+{
+  "entityName": "Spaced Repetition Principle",
+  "maxDepth": 2,
+  "relationshipTypes": ["validates", "builds_upon"]
+}
+\`\`\`
+
+## Management Tools
+
+### 5. add_observations
+**PURPOSE**: Add new insights to existing entities
+**INPUT**: \`{observations: [{entityName: string, contents: string[]}]}\`
+
+### 6. read_graph
+**PURPOSE**: View complete knowledge graph
+**INPUT**: \`{}\` (no parameters)
+
+### 7. delete_entities
+**PURPOSE**: Remove entities and all their relationships
+**INPUT**: \`{entityNames: string[]}\`
+
+### 8. delete_observations
+**PURPOSE**: Remove specific observations from entities
+**INPUT**: \`{deletions: [{entityName: string, observations: string[]}]}\`
+
+### 9. delete_relationships
+**PURPOSE**: Remove specific relationships between entities
+**INPUT**: \`{relationships: [{from: string, to: string, relationType: string}]}\`
+
+## Search Strategy Guide
+
+### When to use semantic_search vs search_related:
+- **semantic_search**: "Find concepts similar to X" (AI similarity)
+- **search_related**: "Show me what connects to X" (graph traversal)
+
+### Workflow Examples:
+1. **Store new learning**: create_entities → create_relationships
+2. **Explore knowledge**: semantic_search → search_related → read_graph
+3. **Update knowledge**: add_observations → create_relationships
+4. **Clean up**: delete_observations → delete_relationships → delete_entities
+`;
       }
     
-      private getMetaLearningGuide(): string {
-        return `# Meta-Learning Tools Guide
-    
-    ## Meta-Learning Entity Types
-    
-    ### meta_learning
-    - **Purpose**: Core learning patterns and techniques
-    - **Examples**: "Active Retrieval Pattern", "Elaborative Interrogation Technique"
-    - **When to use**: For fundamental learning strategies that can be applied across domains
-    
-    ### principle
-    - **Purpose**: Fundamental learning principles backed by research
-    - **Examples**: "Spaced Repetition Principle", "Testing Effect Principle"
-    - **When to use**: For well-established learning laws and principles
-    
-    ### validation
-    - **Purpose**: Research evidence that supports or validates principles
-    - **Examples**: "Ebbinghaus Forgetting Curve Study", "Pashler Meta-Analysis"
-    - **When to use**: For empirical evidence and research findings
-    
-    ### failure_mode
-    - **Purpose**: Common learning mistakes and ineffective approaches
-    - **Examples**: "Cramming Failure Mode", "Highlighting Illusion"
-    - **When to use**: For documenting what doesn't work and why
-    
-    ## Advanced Workflow Patterns
-    
-    ### Pattern 1: Building Learning Hierarchies
-    1. Create principle entities for core concepts
-    2. Add validation entities with supporting research
-    3. Connect with "validates" relationships
-    4. Add failure_mode entities showing what contradicts the principle
-    5. Use "contradicts" relationships to link opposing evidence
-    
-    ### Pattern 2: Meta-Learning Discovery
-    1. Use \`hybrid_search\` with relationship_paths=["builds_upon", "validates"]
-    2. Analyze results with \`analyze_memory_connections\`
-    3. Find chains with \`find_relationship_chains\` to trace learning progressions
-    4. Create new connections based on discovered patterns
-    
-    ### Pattern 3: Knowledge Validation
-    1. Search for existing principles with \`search_with_filters\`
-    2. Get relationships by type: \`get_relationships_by_type\` with "validates"
-    3. Analyze strength of evidence using connection analysis
-    4. Add new validation or contradicting evidence as needed
-    
-    ## Relationship Strength Guidelines
-    
-    - **0.9-1.0**: Strong empirical evidence, multiple replications
-    - **0.7-0.8**: Good evidence, some limitations or context-dependence  
-    - **0.5-0.6**: Moderate evidence, mixed findings
-    - **0.3-0.4**: Weak evidence, preliminary or conflicting
-    - **0.1-0.2**: Very weak evidence, mostly theoretical
-    `;
+      private getAdvancedUsageGuide(): string {
+        return `# Advanced Usage Guide
+
+## Overview
+Use the 9 core tools to build rich knowledge graphs. The system supports 8 entity types with full multi-type functionality for complex knowledge representation.
+
+## Multi-Type Entity Strategy
+
+### Common Multi-Type Combinations
+
+#### person + concept
+- **Use**: For influential thinkers whose ideas are concepts themselves
+- **Example**: ["person", "concept"] for "Albert Einstein" (both the person and his conceptual contributions)
+
+#### technology + process  
+- **Use**: For tools that are also methodologies
+- **Example**: ["technology", "process"] for "Docker" (both software and deployment methodology)
+
+#### document + event
+- **Use**: For important publications that are also historical events
+- **Example**: ["document", "event"] for "Declaration of Independence" (both a document and historical event)
+
+#### organization + location
+- **Use**: For institutions tied to specific places
+- **Example**: ["organization", "location"] for "MIT" (both an institution and a place)
+
+### Single Entity Types
+
+#### person
+- **Purpose**: People, individuals, characters, historical figures
+- **Examples**: "Marie Curie", "John Doe", "Shakespeare"
+- **Best for**: When the focus is on the individual rather than their ideas
+
+#### concept
+- **Purpose**: Abstract ideas, theories, principles, mental models
+- **Examples**: "Democracy", "Machine Learning", "Supply and Demand"
+- **Best for**: Theoretical or abstract knowledge
+
+#### event
+- **Purpose**: Historical events, occurrences, incidents, milestones
+- **Examples**: "World War II", "2008 Financial Crisis", "Product Launch"
+- **Best for**: Time-bound occurrences
+
+#### location
+- **Purpose**: Places, geographical entities, venues, virtual spaces
+- **Examples**: "New York City", "Office Building", "Cloud Infrastructure"
+- **Best for**: Physical or virtual places
+
+#### organization
+- **Purpose**: Companies, institutions, groups, teams
+- **Examples**: "Microsoft", "Harvard University", "Development Team"
+- **Best for**: Structured groups of people
+
+#### document
+- **Purpose**: Books, papers, articles, records, files
+- **Examples**: "Research Paper", "User Manual", "Meeting Notes"
+- **Best for**: Information artifacts
+
+#### technology
+- **Purpose**: Tools, systems, platforms, software
+- **Examples**: "Kubernetes", "Neural Networks", "Programming Language"
+- **Best for**: Technical tools and systems
+
+#### process
+- **Purpose**: Methods, procedures, workflows, algorithms
+- **Examples**: "Code Review Process", "Scientific Method", "Customer Onboarding"
+- **Best for**: Systematic approaches and procedures
+
+## Relationship Types
+
+### relates_to
+- **Purpose**: General connection between entities
+- **Example**: "Einstein" relates_to "Theory of Relativity"
+
+### part_of
+- **Purpose**: Hierarchical relationship (component → container)
+- **Example**: "Marketing Team" part_of "Sales Organization"
+
+### creates
+- **Purpose**: Creation or authorship relationship
+- **Example**: "Shakespeare" creates "Romeo and Juliet"
+
+### uses
+- **Purpose**: Usage or dependency relationship
+- **Example**: "Development Team" uses "Docker"
+
+### influences
+- **Purpose**: Impact or influence relationship
+- **Example**: "Einstein" influences "Modern Physics"
+
+### depends_on
+- **Purpose**: Dependency relationship
+- **Example**: "Frontend Application" depends_on "Backend API"
+
+### similar_to
+- **Purpose**: Similarity relationship
+- **Example**: "Docker" similar_to "Podman"
+
+### opposite_of
+- **Purpose**: Opposition or contrast relationship
+- **Example**: "Centralized System" opposite_of "Decentralized System"
+
+## Workflow Patterns
+
+### Pattern 1: Building Knowledge Networks
+1. **create_entities**: Add core concepts as single types
+2. **create_entities**: Add related people, documents, technologies
+3. **create_relationships**: Connect with appropriate relationship types
+4. **search_related**: Explore connections
+
+### Pattern 2: Multi-Type Entity Modeling
+1. **create_entities**: Use multi-type entities for complex concepts
+2. **add_observations**: Enrich with detailed information
+3. **semantic_search**: Find similar multi-faceted entities
+4. **create_relationships**: Connect different aspects
+
+### Pattern 3: Domain Knowledge Mapping
+1. **create_entities**: Map domain concepts, people, tools
+2. **create_relationships**: Show how they interact
+3. **read_graph**: Get complete domain picture
+4. **add_observations**: Update with new insights
+
+## Example: Complete Workflow with Multi-Types
+
+\`\`\`json
+// 1. Create multi-type entity
+{
+  "entities": [{
+    "name": "Docker",
+    "entityType": ["technology", "process"],
+    "observations": [
+      "Containerization platform for applications",
+      "Standard deployment methodology in DevOps"
+    ]
+  }]
+}
+
+// 2. Add supporting entities
+{
+  "entities": [
+    {
+      "name": "Kubernetes",
+      "entityType": "technology", 
+      "observations": ["Container orchestration platform"]
+    },
+    {
+      "name": "DevOps Team",
+      "entityType": "organization",
+      "observations": ["Team responsible for deployment infrastructure"]
+    }
+  ]
+}
+
+// 3. Create relationships
+{
+  "relationships": [
+    {
+      "from": "Kubernetes",
+      "to": "Docker",
+      "relationType": "uses"
+    },
+    {
+      "from": "DevOps Team", 
+      "to": "Docker",
+      "relationType": "uses"
+    }
+  ]
+}
+\`\`\`
+`;
       }
     
       private getEntityTypesReference(): string {
         return `# Entity Types Reference
-    
-    ## Meta-Learning Types
-    
-    ### meta_learning
-    - **Definition**: Core learning patterns, techniques, and strategies
-    - **Usage**: For fundamental learning approaches that can be applied across domains
-    - **Examples**: 
-      - "Active Retrieval Practice"
-      - "Elaborative Interrogation Technique"
-      - "Interleaving Strategy"
-    - **Metadata Tips**: Use domain tags like "cognitive_strategies", "memory_techniques"
-    
-    ### principle
-    - **Definition**: Well-established learning principles backed by research
-    - **Usage**: For fundamental learning laws and scientific principles
-    - **Examples**:
-      - "Spaced Repetition Principle"
-      - "Testing Effect Principle" 
-      - "Generation Effect"
-    - **Metadata Tips**: Include strength indicators and research domains
-    
-    ### validation
-    - **Definition**: Research evidence, studies, and empirical support
-    - **Usage**: For documenting scientific evidence that supports or refutes principles
-    - **Examples**:
-      - "Ebbinghaus Forgetting Curve Study"
-      - "Roediger Testing Effect Meta-Analysis"
-      - "Bjork Desirable Difficulties Research"
-    - **Metadata Tips**: Include study details, sample sizes, effect sizes
-    
-    ### failure_mode  
-    - **Definition**: Common learning mistakes and ineffective approaches
-    - **Usage**: For documenting what doesn't work and why
-    - **Examples**:
-      - "Cramming Failure Mode"
-      - "Highlighting Illusion"
-      - "Fluency Misattribution"
-    - **Metadata Tips**: Include why it fails and better alternatives
-    
-    ### general
-    - **Definition**: General purpose entities that don't fit other categories
-    - **Usage**: For concepts, facts, or patterns outside the meta-learning domain
-    - **Examples**:
-      - Domain-specific knowledge
-      - General facts or observations
-      - Contextual information
-    - **Metadata Tips**: Use clear domain and tag classification
-    
-    ## Best Practices
-    
-    1. **Choose the Right Type**: Match entity type to the nature of the knowledge
-    2. **Rich Observations**: Include specific, actionable details in observations
-    3. **Comprehensive Metadata**: Use all relevant metadata fields (tags, domain, content)
-    4. **Consistent Naming**: Use clear, descriptive names that avoid ambiguity
-    5. **Content Preservation**: Store exact content separately from interpreted observations
-    `;
+
+## Available Entity Types
+
+### Entity Types (8 Core Types)
+
+#### person
+- **Purpose**: People, individuals, characters, historical figures
+- **Examples**: "Albert Einstein", "Marie Curie", "John Smith"
+- **Multi-type example**: ["person", "concept"] for influential thinkers
+- **When to use**: For any individual human being, real or fictional
+
+#### concept
+- **Purpose**: Abstract ideas, theories, principles, mental models
+- **Examples**: "Democracy", "Machine Learning", "Supply and Demand"
+- **Multi-type example**: ["concept", "process"] for methodological concepts
+- **When to use**: For theoretical or abstract knowledge
+
+#### event
+- **Purpose**: Historical events, occurrences, incidents, milestones
+- **Examples**: "World War II", "2008 Financial Crisis", "Product Launch"
+- **Multi-type example**: ["event", "process"] for procedural events
+- **When to use**: For time-bound occurrences or happenings
+
+#### location
+- **Purpose**: Places, geographical entities, venues, virtual spaces
+- **Examples**: "New York City", "Office Building", "Cloud Infrastructure"
+- **Multi-type example**: ["location", "organization"] for corporate headquarters
+- **When to use**: For physical or virtual places
+
+#### organization
+- **Purpose**: Companies, institutions, groups, teams
+- **Examples**: "Microsoft", "Harvard University", "Development Team"
+- **Multi-type example**: ["organization", "technology"] for tech companies
+- **When to use**: For structured groups of people
+
+#### document
+- **Purpose**: Books, papers, articles, records, files
+- **Examples**: "Research Paper", "User Manual", "Meeting Notes"
+- **Multi-type example**: ["document", "event"] for historic documents
+- **When to use**: For information artifacts and written materials
+
+#### technology
+- **Purpose**: Tools, systems, platforms, software, methodologies
+- **Examples**: "Docker", "Neural Networks", "Agile Methodology"
+- **Multi-type example**: ["technology", "process"] for systematic tools
+- **When to use**: For technical tools, systems, and platforms
+
+#### process
+- **Purpose**: Methods, procedures, workflows, algorithms
+- **Examples**: "Code Review Process", "Scientific Method", "Customer Onboarding"
+- **Multi-type example**: ["process", "technology"] for automated processes
+- **When to use**: For systematic approaches and procedures
+
+### Multiple Entity Types
+Entities can have multiple types for richer categorization:
+\`\`\`json
+{
+  "name": "Docker",
+  "entityType": ["technology", "process"],
+  "observations": ["Containerization platform and deployment methodology"]
+}
+\`\`\`
+
+### Custom Types
+Additional custom types can be added beyond the 8 core types when needed for domain-specific use cases.
+
+## Best Practices
+
+### Naming Conventions
+- Use clear, descriptive names: "Spaced Repetition Principle" not "Spacing"
+- Be specific: "Ebbinghaus 1885 Forgetting Curve Study" not "Memory Study"
+- Include key identifiers when relevant: "Roediger Butler 2011 Meta-Analysis"
+
+### Observations
+- Include specific, actionable details
+- Use concrete examples and measurable outcomes
+- Provide context for application
+- Reference original sources when applicable
+
+### Metadata
+- **domain**: Learning area (e.g., "cognitive_psychology", "educational_methods")
+- **tags**: Relevant keywords for discoverability
+- **content**: Preserve exact original content
+- **created_at**: Timestamp for tracking
+- **id**: Unique identifier (auto-generated)
+
+## Entity Type Selection Guide
+
+**If it's a person or individual** → person
+**If it's an abstract idea or theory** → concept  
+**If it's a time-bound occurrence** → event
+**If it's a place or location** → location
+**If it's a group or institution** → organization
+**If it's written material or artifact** → document
+**If it's a tool or system** → technology
+**If it's a method or procedure** → process
+
+**For complex entities**: Use multiple types like ["person", "concept"] for influential thinkers
+`;
       }
     
       private getRelationshipTypesReference(): string {
         return `# Relationship Types Reference
-    
-    ## Meta-Learning Relationship Types
-    
-    ### validates
-    - **Definition**: Evidence or research that supports a principle or pattern
-    - **Direction**: validation → principle/pattern
-    - **Strength**: Based on quality and quantity of evidence
-    - **Examples**:
-      - "Pashler Meta-Analysis" validates "Spaced Repetition Principle"
-      - "Roediger Studies" validates "Testing Effect Principle"
-    - **Metadata**: Include confidence level, study quality, replication status
-    
-    ### contradicts
-    - **Definition**: Evidence or patterns that oppose or contradict each other
-    - **Direction**: contradiction → target
-    - **Strength**: Based on strength of contradictory evidence
-    - **Examples**:
-      - "Cramming" contradicts "Spaced Repetition Principle"
-      - "Passive Reading" contradicts "Active Retrieval Pattern"
-    - **Metadata**: Include why contradiction exists, context dependencies
-    
-    ### builds_upon
-    - **Definition**: One concept extends or builds on another foundational concept
-    - **Direction**: advanced_concept → foundational_concept
-    - **Strength**: Based on how directly dependent the concepts are
-    - **Examples**:
-      - "Elaborative Interrogation" builds_upon "Active Retrieval"
-      - "Spaced Testing" builds_upon "Testing Effect"
-    - **Metadata**: Include how the extension works, added value
-    
-    ### connects_to
-    - **Definition**: General connections between related concepts
-    - **Direction**: concept1 ↔ concept2 (bidirectional)
-    - **Strength**: Based on closeness of relationship
-    - **Examples**:
-      - "Memory Palace" connects_to "Elaborative Encoding"
-      - "Metacognition" connects_to "Self-Testing"
-    - **Metadata**: Include nature of connection, context
-    
-    ### implements
-    - **Definition**: Practical application or implementation of a principle
-    - **Direction**: implementation → principle
-    - **Strength**: Based on how faithfully it implements the principle
-    - **Examples**:
-      - "Anki Algorithm" implements "Spaced Repetition Principle"
-      - "Practice Testing" implements "Testing Effect"
-    - **Metadata**: Include implementation details, effectiveness
-    
-    ### derives_from
-    - **Definition**: Logical derivation or theoretical development from another concept
-    - **Direction**: derived_concept → source_concept
-    - **Strength**: Based on logical rigor and directness
-    - **Examples**:
-      - "Optimal Review Intervals" derives_from "Forgetting Curve"
-      - "Difficulty Desirability" derives_from "Transfer Appropriate Processing"
-    - **Metadata**: Include derivation logic, theoretical basis
-    
-    ## Relationship Strength Guidelines
-    
-    ### Evidence-Based Strength (validates, contradicts)
-    - **0.9-1.0**: Multiple high-quality studies, strong effect sizes, consistent replication
-    - **0.7-0.8**: Good evidence with some limitations or context dependencies
-    - **0.5-0.6**: Moderate evidence, mixed findings, or limited scope
-    - **0.3-0.4**: Weak evidence, preliminary findings, or contradictory results
-    - **0.1-0.2**: Very weak evidence, mostly theoretical or anecdotal
-    
-    ### Conceptual Strength (builds_upon, derives_from, implements)
-    - **0.9-1.0**: Direct, essential dependency; cannot exist without foundation
-    - **0.7-0.8**: Strong relationship with clear logical connection
-    - **0.5-0.6**: Moderate relationship, some independence possible
-    - **0.3-0.4**: Weak relationship, mostly tangential connection
-    - **0.1-0.2**: Very weak relationship, minor or disputed connection
-    
-    ## Usage Patterns
-    
-    ### Building Knowledge Hierarchies
-    1. Start with foundational principles
-    2. Add validating evidence with "validates" relationships
-    3. Connect related concepts with "connects_to"
-    4. Show implementations with "implements" relationships
-    5. Document contradictions and failure modes
-    
-    ### Tracing Learning Progressions
-    1. Use "builds_upon" to show concept development
-    2. Use "derives_from" to show theoretical development
-    3. Chain relationships to trace knowledge evolution
-    4. Analyze chains to understand learning pathways
-    `;
+
+## Available Relationship Types
+
+### relates_to
+- **Purpose**: General connection between entities
+- **Direction**: bidirectional (entity_a ↔ entity_b)
+- **When to use**: For general relationships that don't fit other specific categories
+- **Example**: "Einstein" relates_to "Theory of Relativity"
+- **Metadata**: Include nature of connection, context
+
+### part_of  
+- **Purpose**: Hierarchical relationship (component is part of container)
+- **Direction**: component → container
+- **When to use**: When one entity is a component or subset of another
+- **Example**: "Marketing Team" part_of "Sales Organization"
+- **Metadata**: Include hierarchical context, percentage if relevant
+
+### creates
+- **Purpose**: Creation, authorship, or origination relationship
+- **Direction**: creator → created_entity
+- **When to use**: When one entity brings another into existence
+- **Example**: "Shakespeare" creates "Romeo and Juliet"
+- **Metadata**: Include creation date, context, method
+
+### uses
+- **Purpose**: Usage, utilization, or dependency relationship
+- **Direction**: user → used_entity
+- **When to use**: When one entity utilizes or depends on another
+- **Example**: "Development Team" uses "Docker"
+- **Metadata**: Include usage context, frequency, purpose
+
+### influences
+- **Purpose**: Impact, influence, or effect relationship
+- **Direction**: influencer → influenced_entity
+- **When to use**: When one entity affects or impacts another
+- **Example**: "Einstein" influences "Modern Physics"
+- **Metadata**: Include type of influence, degree, timeframe
+
+### depends_on
+- **Purpose**: Strong dependency relationship
+- **Direction**: dependent → dependency
+- **When to use**: When one entity cannot function without another
+- **Example**: "Frontend Application" depends_on "Backend API"
+- **Metadata**: Include criticality, type of dependency
+
+### similar_to
+- **Purpose**: Similarity or comparison relationship
+- **Direction**: bidirectional (entity_a ↔ entity_b)
+- **When to use**: When entities share characteristics or serve similar purposes
+- **Example**: "Docker" similar_to "Podman"
+- **Metadata**: Include similarities, differences, comparison criteria
+
+### opposite_of
+- **Purpose**: Opposition, contrast, or antithetical relationship
+- **Direction**: bidirectional (entity_a ↔ entity_b)
+- **When to use**: When entities represent opposing concepts or approaches
+- **Example**: "Centralized System" opposite_of "Decentralized System"
+- **Metadata**: Include nature of opposition, context
+
+## Strength Guidelines
+
+### 0.9-1.0: Very Strong
+- Multiple high-quality studies
+- Consistent replication
+- Strong theoretical basis
+
+### 0.7-0.8: Strong  
+- Good empirical support
+- Some replication
+- Clear logical connection
+
+### 0.5-0.6: Moderate
+- Limited evidence
+- Some theoretical support
+- Contextual relationship
+
+### 0.3-0.4: Weak
+- Minimal evidence
+- Speculative connection
+- Context-dependent
+
+## Best Practices
+
+### Choosing Relationship Types
+1. **Start specific**: Use validates, contradicts, implements when applicable
+2. **Fall back to general**: Use connects_to for unclear relationships
+3. **Consider direction**: Most relationships have a natural direction
+4. **Check existing**: Use search_related to see existing relationship patterns
+
+### Setting Strength Scores
+- Base on evidence quality, not personal opinion
+- Consider replication and sample sizes
+- Account for context dependencies
+- Update as new evidence emerges
+
+### Metadata Guidelines
+- **strength**: 0.0-1.0 numerical score
+- **context**: Why this relationship exists
+- **evidence**: Supporting facts or studies
+- **created_at**: Timestamp
+- **confidence**: Your confidence in this relationship
+
+## Relationship Selection Guide
+
+**Strong empirical support** → validates
+**Clear opposition/contradiction** → contradicts  
+**Technique puts principle into practice** → implements
+**Advanced builds on basic** → builds_upon
+**Logical development** → derives_from
+**General connection** → connects_to
+`;
       }  async run() {
     try {
       await this.graphManager.initialize();

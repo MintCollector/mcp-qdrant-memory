@@ -6,17 +6,29 @@ This MCP server provides a knowledge graph implementation with semantic search c
 ## Features
 
 - Graph-based knowledge representation with entities and relations
-- File-based persistence (memory.json)
+- **Automatic UUID & Timestamp Management**:
+  - Auto-generated UUIDs for all entities and relationships
+  - Automatic `created_at` and `updated_at` timestamps
+  - Guaranteed data integrity and traceability
+- **Dual Persistence Options**:
+  - **JSON**: File-based persistence (memory.json) - Default
+  - **Neo4j**: Graph database with advanced querying capabilities
 - Semantic search using Qdrant vector database
-- OpenAI embeddings for semantic similarity
+- **Dual Embedding Providers**:
+  - OpenAI embeddings (text-embedding-ada-002, text-embedding-3-small/large)
+  - Google embeddings (text-embedding-004, textembedding-gecko)
 - HTTPS support with reverse proxy compatibility
 - Docker support for easy deployment
+- Advanced graph traversal and analytics (Neo4j mode)
 
 ## Environment Variables
 
 The following environment variables are required:
 
 ```bash
+# Persistence type: 'json' or 'neo4j' (default: 'json')
+PERSISTENCE_TYPE=json
+
 # Embedding provider: 'openai' or 'google' (default: 'openai')
 EMBEDDING_PROVIDER=openai
 
@@ -37,6 +49,12 @@ QDRANT_API_KEY=your-qdrant-api-key
 
 # Name of the Qdrant collection to use
 QDRANT_COLLECTION_NAME=your-collection-name
+
+# Neo4j configuration (only required if PERSISTENCE_TYPE=neo4j)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-neo4j-password
+NEO4J_DATABASE=neo4j
 ```
 
 ## Supported Embedding Models
@@ -86,7 +104,7 @@ docker run -d \
 
 ### Add to MCP settings:
 
-#### For OpenAI Embeddings:
+#### For JSON Persistence + OpenAI Embeddings:
 ```json
 {
   "mcpServers": {
@@ -94,6 +112,7 @@ docker run -d \
       "command": "/bin/zsh",
       "args": ["-c", "cd /path/to/server && node dist/index.js"],
       "env": {
+        "PERSISTENCE_TYPE": "json",
         "EMBEDDING_PROVIDER": "openai",
         "EMBEDDING_MODEL": "text-embedding-ada-002",
         "OPENAI_API_KEY": "your-openai-api-key",
@@ -103,20 +122,21 @@ docker run -d \
       },
       "alwaysAllow": [
         "create_entities",
-        "create_relations",
+        "create_relationships",
         "add_observations",
         "delete_entities",
         "delete_observations",
-        "delete_relations",
+        "delete_relationships",
         "read_graph",
-        "semantic_search"
+        "semantic_search",
+        "search_related"
       ]
     }
   }
 }
 ```
 
-#### For Google Embeddings:
+#### For Neo4j Persistence + Google Embeddings:
 ```json
 {
   "mcpServers": {
@@ -124,6 +144,11 @@ docker run -d \
       "command": "/bin/zsh",
       "args": ["-c", "cd /path/to/server && node dist/index.js"],
       "env": {
+        "PERSISTENCE_TYPE": "neo4j",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-neo4j-password",
+        "NEO4J_DATABASE": "neo4j",
         "EMBEDDING_PROVIDER": "google",
         "EMBEDDING_MODEL": "text-embedding-004",
         "GOOGLE_API_KEY": "your-google-api-key",
@@ -133,13 +158,14 @@ docker run -d \
       },
       "alwaysAllow": [
         "create_entities",
-        "create_relations",
+        "create_relationships",
         "add_observations",
         "delete_entities",
         "delete_observations",
-        "delete_relations",
+        "delete_relationships",
         "read_graph",
-        "semantic_search"
+        "semantic_search",
+        "search_related"
       ]
     }
   }
@@ -150,15 +176,16 @@ docker run -d \
 
 ### Entity Management
 - `create_entities`: Create multiple new entities
-- `create_relations`: Create relations between entities
+- `create_relationships`: Create relationships between entities
 - `add_observations`: Add observations to entities
-- `delete_entities`: Delete entities and their relations
+- `delete_entities`: Delete entities and their relationships
 - `delete_observations`: Delete specific observations
-- `delete_relations`: Delete specific relations
+- `delete_relationships`: Delete specific relationships
 - `read_graph`: Get the full knowledge graph
 
-### Semantic Search
-- `semantic_search`: Search for semantically similar entities and relations (vector database only)
+### Search & Discovery
+- `semantic_search`: Search for semantically similar entities and relationships (vector database)
+- `search_related`: Find connected entities through graph traversal (supports both JSON and Neo4j)
   ```typescript
   interface SearchParams {
     query: string;     // Search query text
@@ -168,23 +195,73 @@ docker run -d \
 
 ## Implementation Details
 
-The server maintains two forms of persistence:
+The server supports two persistence modes with semantic search capabilities:
 
-1. File-based (memory.json):
+### JSON Persistence Mode (Default)
+1. **File-based** (memory.json):
    - Complete knowledge graph structure
    - Fast access to full graph
    - Used for graph operations
 
-2. Qdrant Vector DB:
+2. **Qdrant Vector DB**:
    - Semantic embeddings of entities and relations
    - Enables similarity search
    - Automatically synchronized with file storage
 
+### Neo4j Persistence Mode
+1. **Neo4j Graph Database**:
+   - Native graph storage and operations
+   - Advanced Cypher query capabilities
+   - ACID transactions and data integrity
+   - Efficient graph traversal algorithms
+   - Built-in graph analytics (clustering, shortest paths, etc.)
+
+2. **Qdrant Vector DB**:
+   - Semantic embeddings for similarity search
+   - Automatically synchronized with Neo4j
+
+### Automatic Metadata Management
+All entities and relationships automatically receive:
+- **Unique IDs**: Auto-generated UUIDs for guaranteed uniqueness
+- **Created Timestamp**: `created_at` set when first created
+- **Updated Timestamp**: `updated_at` updated on every modification
+- **Data Integrity**: Consistent metadata across both persistence layers
+
+Example entity with auto-generated metadata:
+```json
+{
+  "name": "My Knowledge Item",
+  "entityType": "concept",
+  "observations": ["Important information"],
+  "metadata": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "created_at": "2025-06-21T23:03:12.126Z",
+    "updated_at": "2025-06-21T23:03:12.126Z",
+    "domain": "learning",
+    "tags": ["important"]
+  }
+}
+```
+
+### Neo4j Advanced Features
+When using Neo4j persistence, additional capabilities include:
+- **Custom Cypher Queries**: Execute arbitrary graph queries
+- **Shortest Path Finding**: Optimized pathfinding between entities
+- **Graph Analytics**: Clustering coefficient, node degree analysis
+- **Performance**: Optimized for large-scale graph operations
+- **ACID Transactions**: Data consistency and reliability
+
 ### Synchronization
 
-When entities or relations are modified:
+**JSON Mode**: When entities or relations are modified:
 1. Changes are written to memory.json
-2. Embeddings are generated using OpenAI
+2. Embeddings are generated using configured provider (OpenAI/Google)
+3. Vectors are stored in Qdrant
+4. Both storage systems remain consistent
+
+**Neo4j Mode**: When entities or relations are modified:
+1. Changes are written to Neo4j database
+2. Embeddings are generated using configured provider (OpenAI/Google)
 3. Vectors are stored in Qdrant
 4. Both storage systems remain consistent
 
@@ -208,10 +285,26 @@ await client.callTool("create_entities", {
   }]
 });
 
+// Create relationships  
+await client.callTool("create_relationships", {
+  relationships: [{
+    from: "Project",
+    to: "Development Team",
+    relationType: "assigned_to"
+  }]
+});
+
 // Search similar concepts
-const results = await client.callTool("search_similar", {
+const results = await client.callTool("semantic_search", {
   query: "development tasks",
   limit: 5
+});
+
+// Find related entities through graph traversal
+const related = await client.callTool("search_related", {
+  entityName: "Project",
+  maxDepth: 2,
+  relationshipTypes: ["assigned_to", "depends_on"]
 });
 ```
 
@@ -273,6 +366,53 @@ curl -v https://qdrant.yourdomain.com/collections
 ```bash
 env | grep -i proxy
 ```
+
+## Troubleshooting
+
+### Common Setup Issues
+
+#### Neo4j Configuration Error
+**Error**: `NEO4J_USER environment variable is required when using Neo4j persistence`
+
+**Solution**: This happens when `PERSISTENCE_TYPE=neo4j` is set but Neo4j variables are incomplete. You have two options:
+
+1. **Use JSON persistence (recommended for most users)**:
+   ```json
+   {
+     "env": {
+       "PERSISTENCE_TYPE": "json",
+       "EMBEDDING_PROVIDER": "openai",
+       "OPENAI_API_KEY": "your-key",
+       "QDRANT_URL": "your-qdrant-url",
+       "QDRANT_COLLECTION_NAME": "your-collection"
+     }
+   }
+   ```
+
+2. **Complete Neo4j setup** (requires Neo4j database):
+   ```json
+   {
+     "env": {
+       "PERSISTENCE_TYPE": "neo4j",
+       "NEO4J_URI": "bolt://localhost:7687",
+       "NEO4J_USER": "neo4j", 
+       "NEO4J_PASSWORD": "your-neo4j-password",
+       "NEO4J_DATABASE": "neo4j",
+       "EMBEDDING_PROVIDER": "openai",
+       "OPENAI_API_KEY": "your-key",
+       "QDRANT_URL": "your-qdrant-url",
+       "QDRANT_COLLECTION_NAME": "your-collection"
+     }
+   }
+   ```
+
+#### Quick Fix for Most Users
+If you're getting Neo4j errors and just want the system to work, add this to your MCP config:
+```json
+"PERSISTENCE_TYPE": "json"
+```
+
+This will use the reliable file-based storage instead of Neo4j.
 
 ## Contributing
 

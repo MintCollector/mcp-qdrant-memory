@@ -11,9 +11,7 @@ export interface CreateEntitiesRequest {
   entities: Entity[];
 }
 
-export interface CreateRelationsRequest {
-  relations: Relation[];
-}
+
 
 export interface AddObservationsRequest {
   observations: Array<{
@@ -33,9 +31,7 @@ export interface DeleteObservationsRequest {
   }>;
 }
 
-export interface DeleteRelationsRequest {
-  relations: Relation[];
-}
+
 
 export interface SearchSimilarRequest {
   query: string;
@@ -55,6 +51,7 @@ function isEntityMetadata(value: unknown): value is EntityMetadata {
   return (
     (value.id === undefined || typeof value.id === 'string') &&
     typeof value.created_at === 'string' &&
+    (value.updated_at === undefined || typeof value.updated_at === 'string') &&
     (value.tags === undefined || isStringArray(value.tags)) &&
     (value.domain === undefined || typeof value.domain === 'string') &&
     (value.content === undefined || typeof value.content === 'string')
@@ -64,8 +61,10 @@ function isEntityMetadata(value: unknown): value is EntityMetadata {
 function isRelationshipMetadata(value: unknown): value is RelationshipMetadata {
   if (!isRecord(value)) return false;
   return (
+    (value.id === undefined || typeof value.id === 'string') &&
     (value.strength === undefined || (typeof value.strength === 'number' && value.strength >= 0 && value.strength <= 1)) &&
     typeof value.created_at === 'string' &&
+    (value.updated_at === undefined || typeof value.updated_at === 'string') &&
     (value.context === undefined || typeof value.context === 'string') &&
     (value.evidence === undefined || isStringArray(value.evidence))
   );
@@ -73,9 +72,18 @@ function isRelationshipMetadata(value: unknown): value is RelationshipMetadata {
 
 function isEntity(value: unknown): value is Entity {
   if (!isRecord(value)) return false;
+  
+  // Check entityType is either string or string array
+  const isValidEntityType = (
+    typeof value.entityType === 'string' ||
+    (Array.isArray(value.entityType) && 
+     value.entityType.length > 0 &&
+     value.entityType.every(type => typeof type === 'string'))
+  );
+  
   return (
     typeof value.name === 'string' &&
-    typeof value.entityType === 'string' &&
+    isValidEntityType &&
     Array.isArray(value.observations) &&
     value.observations.every(obs => typeof obs === 'string') &&
     (value.metadata === undefined || isEntityMetadata(value.metadata))
@@ -105,18 +113,7 @@ export function validateCreateEntitiesRequest(args: unknown): CreateEntitiesRequ
   return { entities };
 }
 
-export function validateCreateRelationsRequest(args: unknown): CreateRelationsRequest {
-  if (!isRecord(args)) {
-    throw new McpError(ErrorCode.InvalidParams, "Invalid request format");
-  }
 
-  const { relations } = args;
-  if (!Array.isArray(relations) || !relations.every(isRelation)) {
-    throw new McpError(ErrorCode.InvalidParams, "Invalid relations array");
-  }
-
-  return { relations };
-}
 
 export function validateAddObservationsRequest(args: unknown): AddObservationsRequest {
   if (!isRecord(args)) {
@@ -169,18 +166,7 @@ export function validateDeleteObservationsRequest(args: unknown): DeleteObservat
   return { deletions: deletions as DeleteObservationsRequest['deletions'] };
 }
 
-export function validateDeleteRelationsRequest(args: unknown): DeleteRelationsRequest {
-  if (!isRecord(args)) {
-    throw new McpError(ErrorCode.InvalidParams, "Invalid request format");
-  }
 
-  const { relations } = args;
-  if (!Array.isArray(relations) || !relations.every(isRelation)) {
-    throw new McpError(ErrorCode.InvalidParams, "Invalid relations array");
-  }
-
-  return { relations };
-}
 
 export function validateCreateRelationshipsRequest(args: unknown): { relationships: Relation[] } {
   if (!isRecord(args)) {
