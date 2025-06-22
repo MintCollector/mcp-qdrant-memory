@@ -129,7 +129,7 @@ class MemoryServer {
       tools: [
         {
           name: "create_entities",
-          description: "Create multiple new entities in the knowledge graph. Use for adding people, organizations, locations, events, concepts, workflows, objects, tasks, and preferences. Input: {entities: [{name: string, entityType: string|string[], observations: string[], metadata?: object}]}. Entity types: person, organization, location, event, concept, workflow, object, task, preferences. Custom types also supported.",
+          description: "Create multiple new entities in the knowledge graph. Use for adding people, organizations, locations, events, concepts, workflows, objects, tasks, and preferences. Input: {entities: [{name: string, entityType: string|string[], observations: string[], metadata?: {domain?: string, tags?: string[], content?: string}}]}. Entity types: person, organization, location, event, concept, workflow, object, task, preferences. Custom types also supported. Note: id, created_at, and updated_at are auto-generated.",
           inputSchema: {
             type: "object",
             properties: {
@@ -163,7 +163,7 @@ class MemoryServer {
         },
         {
           name: "create_relationships",
-          description: "Create relationships between existing entities. Use for connecting concepts, facts, or learning patterns. Input: {relationships: [{from: string, to: string, relationType: string, metadata?: object}]}",
+          description: "Create relationships between existing entities. Use for connecting concepts, facts, or learning patterns. Input: {relationships: [{from: string, to: string, relationType: string, metadata?: {strength?: number, context?: string, evidence?: string[]}}]}. Note: id, created_at, and updated_at are auto-generated.",
           inputSchema: {
             type: "object",
             properties: {

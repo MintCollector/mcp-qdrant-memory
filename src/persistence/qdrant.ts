@@ -185,10 +185,11 @@ export class QdrantPersistence {
               distance: "Cosine",
             },
             // Enable binary quantization for 40x performance boost with OpenAI embeddings
-            quantization_config: {
-              type: "binary",
-              always_ram: true,
-            },
+            // NOTE: Temporarily disabled due to Qdrant server compatibility issues
+            // quantization_config: {
+            //   type: "binary",
+            //   always_ram: true,
+            // },
           });
           return;
         }
@@ -232,10 +233,11 @@ export class QdrantPersistence {
             distance: "Cosine",
           },
           // Enable binary quantization for 40x performance boost with OpenAI embeddings
-          quantization_config: {
-            type: "binary",
-            always_ram: true,
-          },
+          // NOTE: Temporarily disabled due to Qdrant server compatibility issues
+          // quantization_config: {
+          //   type: "binary",
+          //   always_ram: true,
+          // },
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown Qdrant error";

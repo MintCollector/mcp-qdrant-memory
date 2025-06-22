@@ -46,25 +46,27 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
 
-function isEntityMetadata(value: unknown): value is EntityMetadata {
+// For user input validation - only user-provided fields, no auto-generated fields
+function isEntityMetadataInput(value: unknown): boolean {
   if (!isRecord(value)) return false;
+  
+  // Only validate user-provided fields
+  // Auto-generated fields (id, created_at, updated_at) are NOT part of the input
   return (
-    (value.id === undefined || typeof value.id === 'string') &&
-    typeof value.created_at === 'string' &&
-    (value.updated_at === undefined || typeof value.updated_at === 'string') &&
     (value.tags === undefined || isStringArray(value.tags)) &&
     (value.domain === undefined || typeof value.domain === 'string') &&
     (value.content === undefined || typeof value.content === 'string')
   );
 }
 
-function isRelationshipMetadata(value: unknown): value is RelationshipMetadata {
+// For user input validation - only user-provided fields, no auto-generated fields
+function isRelationshipMetadataInput(value: unknown): boolean {
   if (!isRecord(value)) return false;
+  
+  // Only validate user-provided fields
+  // Auto-generated fields (id, created_at, updated_at) are NOT part of the input
   return (
-    (value.id === undefined || typeof value.id === 'string') &&
     (value.strength === undefined || (typeof value.strength === 'number' && value.strength >= 0 && value.strength <= 1)) &&
-    typeof value.created_at === 'string' &&
-    (value.updated_at === undefined || typeof value.updated_at === 'string') &&
     (value.context === undefined || typeof value.context === 'string') &&
     (value.evidence === undefined || isStringArray(value.evidence))
   );
@@ -86,7 +88,7 @@ function isEntity(value: unknown): value is Entity {
     isValidEntityType &&
     Array.isArray(value.observations) &&
     value.observations.every(obs => typeof obs === 'string') &&
-    (value.metadata === undefined || isEntityMetadata(value.metadata))
+    (value.metadata === undefined || isEntityMetadataInput(value.metadata))
   );
 }
 
@@ -96,7 +98,7 @@ function isRelation(value: unknown): value is Relation {
     typeof value.from === 'string' &&
     typeof value.to === 'string' &&
     typeof value.relationType === 'string' &&
-    (value.metadata === undefined || isRelationshipMetadata(value.metadata))
+    (value.metadata === undefined || isRelationshipMetadataInput(value.metadata))
   );
 }
 
