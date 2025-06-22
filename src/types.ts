@@ -66,3 +66,13 @@ export interface SearchResult {
   score: number;
   data: Entity | Relation;
 }
+
+export interface SearchFilters {
+  entity_types?: string[];
+  domains?: string[];
+  tags?: string[];
+  date_range?: {
+    start: string;
+    end: string;
+  };
+}

@@ -11,7 +11,7 @@ import {
   NEO4J_PASSWORD, 
   NEO4J_DATABASE 
 } from '../config.js';
-import { Entity, Relation, KnowledgeGraph } from '../types.js';
+import { Entity, Relation, KnowledgeGraph, SearchFilters } from '../types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MEMORY_FILE_PATH = path.join(__dirname, '../memory.json');
@@ -362,9 +362,13 @@ export class HybridPersistence implements PersistenceInterface {
     return this.persistence.searchRelated(entityName, maxDepth, relationshipTypes);
   }
 
-  async searchSimilar(query: string, limit: number = 10): Promise<Array<Entity | Relation>> {
-    return this.qdrant.searchSimilar(query, limit);
-  }
+  async searchSimilar(query: string, limit: number = 10, scoreThreshold?: number): Promise<Array<Entity | Relation>> {
+      return this.qdrant.searchSimilar(query, limit, scoreThreshold);
+    }
+  
+  async searchWithFilters(query: string, filters?: SearchFilters, limit: number = 10, scoreThreshold?: number): Promise<Array<Entity | Relation>> {
+      return this.qdrant.searchWithFilters(query, filters, limit, scoreThreshold);
+    }
 
   async close(): Promise<void> {
     if (this.persistence.close) {

@@ -16,6 +16,7 @@ import {
   Entity, 
   Relation, 
   KnowledgeGraph, 
+  SearchFilters,
 
 } from './types.js';
 import {
@@ -69,11 +70,17 @@ class KnowledgeGraphManager {
     return this.persistence.getGraph();
   }
 
-  async searchSimilar(query: string, limit: number = 10): Promise<Array<Entity | Relation>> {
-    // Ensure limit is a positive number
-    const validLimit = Math.max(1, Math.min(limit, 100)); // Cap at 100 results
-    return await this.persistence.searchSimilar(query, validLimit);
-  }
+  async searchSimilar(query: string, limit: number = 10, scoreThreshold?: number): Promise<Array<Entity | Relation>> {
+      // Ensure limit is a positive number
+      const validLimit = Math.max(1, Math.min(limit, 100)); // Cap at 100 results
+      return await this.persistence.searchSimilar(query, validLimit, scoreThreshold);
+    }
+  
+  async searchWithFilters(query: string, filters?: SearchFilters, limit: number = 10, scoreThreshold?: number): Promise<Array<Entity | Relation>> {
+      // Ensure limit is a positive number
+      const validLimit = Math.max(1, Math.min(limit, 100)); // Cap at 100 results
+      return await this.persistence.searchWithFilters(query, filters, validLimit, scoreThreshold);
+    }
 
   async searchRelated(entityName: string, maxDepth: number = 2, relationshipTypes?: string[]): Promise<{
     entities: Entity[];
@@ -284,6 +291,54 @@ class MemoryServer {
           }
         },
         {
+          name: "advanced_search",
+          description: "Advanced semantic search with filtering capabilities. Use for precise searches with entity type, domain, tag, or date filters. Input: {query: string, filters?: {entity_types?: string[], domains?: string[], tags?: string[], date_range?: {start: string, end: string}}, limit?: number, score_threshold?: number}",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+              filters: {
+                type: "object",
+                properties: {
+                  entity_types: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Filter by entity types (person, organization, location, event, concept, workflow, object, task, preferences)"
+                  },
+                  domains: {
+                    type: "array", 
+                    items: { type: "string" },
+                    description: "Filter by domain metadata"
+                  },
+                  tags: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Filter by tag metadata"
+                  },
+                  date_range: {
+                    type: "object",
+                    properties: {
+                      start: { type: "string", description: "Start date (ISO 8601)" },
+                      end: { type: "string", description: "End date (ISO 8601)" }
+                    },
+                    required: ["start", "end"]
+                  }
+                }
+              },
+              limit: {
+                type: "number",
+                default: 10,
+                description: "Maximum results (1-100)"
+              },
+              score_threshold: {
+                type: "number",
+                description: "Minimum similarity score (0.0-1.0)"
+              }
+            },
+            required: ["query"]
+          }
+        },
+        {
           name: "search_related",
           description: "Find entities connected through the knowledge graph structure. Use for discovering related information via relationships. Input: {entityName: string, maxDepth?: number, relationshipTypes?: string[]}",
           inputSchema: {
@@ -386,6 +441,25 @@ class MemoryServer {
             const results = await this.graphManager.searchSimilar(
               args.query,
               args.limit
+            );
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(results, null, 2),
+                },
+              ],
+            };
+          }
+
+          case "advanced_search": {
+            // For now, use basic argument validation since we don't have a specific validator yet
+            const args = request.params.arguments as any;
+            const results = await this.graphManager.searchWithFilters(
+              args.query,
+              args.filters,
+              args.limit,
+              args.score_threshold
             );
             return {
               content: [
@@ -554,30 +628,65 @@ class MemoryServer {
 **BEST FOR**: Discovering related concepts, exploring similar ideas
 **EXAMPLE**: "memory techniques for better learning"
 
-### 4. search_related
+### 4. advanced_search
+**PURPOSE**: Advanced semantic search with filtering capabilities (combines AI similarity with precise filtering)
+**INPUT**: \`{query: string, filters?: {entity_types?: string[], domains?: string[], tags?: string[], date_range?: {start: string, end: string}}, limit?: number, score_threshold?: number}\`
+**BEST FOR**: Precise searches when you know specific criteria
+**EXAMPLES**:
+\`\`\`json
+// Find people in science domain
+{
+  "query": "physicist researcher",
+  "filters": {
+    "entity_types": ["person"],
+    "domains": ["science"]
+  }
+}
+
+// Find recent technology concepts
+{
+  "query": "AI machine learning",
+  "filters": {
+    "entity_types": ["concept"],
+    "tags": ["technology"],
+    "date_range": {
+      "start": "2024-01-01T00:00:00Z",
+      "end": "2024-12-31T23:59:59Z"
+    }
+  }
+}
+
+// High-confidence similarity search
+{
+  "query": "quantum computing",
+  "score_threshold": 0.8
+}
+\`\`\`
+
+### 5. search_related
 **PURPOSE**: Find connected entities via knowledge graph relationships (traverses graph structure)
 **INPUT**: \`{entityName: string, maxDepth?: number, relationshipTypes?: string[]}\`
 **BEST FOR**: Understanding how concepts connect, finding relationship chains
 
 ## Management Tools
 
-### 5. add_observations
+### 6. add_observations
 **PURPOSE**: Add new insights to existing entities
 **INPUT**: \`{observations: [{entityName: string, contents: string[]}]}\`
 
-### 6. read_graph
+### 7. read_graph
 **PURPOSE**: View complete knowledge graph
 **INPUT**: \`{}\` (no parameters)
 
-### 7. delete_entities
+### 8. delete_entities
 **PURPOSE**: Remove entities and all their relationships
 **INPUT**: \`{entityNames: string[]}\`
 
-### 8. delete_observations
+### 9. delete_observations
 **PURPOSE**: Remove specific observations from entities
 **INPUT**: \`{deletions: [{entityName: string, observations: string[]}]}\`
 
-### 9. delete_relationships
+### 10. delete_relationships
 **PURPOSE**: Remove specific relationships between entities
 **INPUT**: \`{relationships: [{from: string, to: string, relationType: string}]}\`
 

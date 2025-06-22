@@ -11,7 +11,7 @@ import {
   GOOGLE_API_KEY,
   QDRANT_API_KEY
 } from "../config.js";
-import { Entity, Relation } from "../types.js";
+import { Entity, Relation, SearchFilters } from "../types.js";
 
 // Create custom Qdrant client that uses environment API key
 class CustomQdrantClient extends QdrantClient {
@@ -169,7 +169,7 @@ export class QdrantPersistence {
       }
   
       // Get vector size based on model
-    const requiredVectorSize = this.getVectorSizeForModel(FINAL_EMBEDDING_MODEL);
+      const requiredVectorSize = this.getVectorSizeForModel(FINAL_EMBEDDING_MODEL);
   
       try {
         // Check if collection exists
@@ -183,6 +183,11 @@ export class QdrantPersistence {
             vectors: {
               size: requiredVectorSize,
               distance: "Cosine",
+            },
+            // Enable binary quantization for 40x performance boost with OpenAI embeddings
+            quantization_config: {
+              type: "binary",
+              always_ram: true,
             },
           });
           return;
@@ -213,24 +218,31 @@ export class QdrantPersistence {
     }
 
 
+
   private async recreateCollection(vectorSize: number) {
-    if (!COLLECTION_NAME) {
-      throw new Error("COLLECTION_NAME environment variable is required in recreateCollection");
+      if (!COLLECTION_NAME) {
+        throw new Error("COLLECTION_NAME environment variable is required in recreateCollection");
+      }
+  
+      try {
+        await this.client.deleteCollection(COLLECTION_NAME);
+        await this.client.createCollection(COLLECTION_NAME, {
+          vectors: {
+            size: vectorSize,
+            distance: "Cosine",
+          },
+          // Enable binary quantization for 40x performance boost with OpenAI embeddings
+          quantization_config: {
+            type: "binary",
+            always_ram: true,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+        throw new Error(`Failed to recreate collection: ${message}`);
+      }
     }
 
-    try {
-      await this.client.deleteCollection(COLLECTION_NAME);
-      await this.client.createCollection(COLLECTION_NAME, {
-        vectors: {
-          size: vectorSize,
-          distance: "Cosine",
-        },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown Qdrant error";
-      throw new Error(`Failed to recreate collection: ${message}`);
-    }
-  }
 
   private async generateEmbedding(text: string) {
       try {
@@ -367,38 +379,45 @@ export class QdrantPersistence {
     });
   }
 
-  async searchSimilar(query: string, limit: number = 10) {
-    await this.connect();
-    if (!COLLECTION_NAME) {
-      throw new Error("COLLECTION_NAME environment variable is required");
-    }
-
-    const queryVector = await this.generateEmbedding(query);
-
-    const results = await this.client.search(COLLECTION_NAME, {
-      vector: queryVector,
-      limit,
-      with_payload: true,
-    });
-
-    const validResults: Array<Entity | Relation> = [];
-
-    for (const result of results) {
-      if (!result.payload) continue;
-
-      const payload = result.payload as unknown as Payload;
-
-      if (isEntity(payload)) {
-        const { type, ...entity } = payload;
-        validResults.push(entity);
-      } else if (isRelation(payload)) {
-        const { type, ...relation } = payload;
-        validResults.push(relation);
+  async searchSimilar(query: string, limit: number = 10, scoreThreshold?: number) {
+      await this.connect();
+      if (!COLLECTION_NAME) {
+        throw new Error("COLLECTION_NAME environment variable is required");
       }
+  
+      const queryVector = await this.generateEmbedding(query);
+  
+      const results = await this.client.search(COLLECTION_NAME, {
+        vector: queryVector,
+        limit,
+        with_payload: true,
+        // Use 3x oversampling for better accuracy with binary quantization
+        params: {
+          oversampling: 3.0,
+        },
+        // Optional score threshold for filtering low-confidence results
+        ...(scoreThreshold && { score_threshold: scoreThreshold }),
+      });
+  
+      const validResults: Array<Entity | Relation> = [];
+  
+      for (const result of results) {
+        if (!result.payload) continue;
+  
+        const payload = result.payload as unknown as Payload;
+  
+        if (isEntity(payload)) {
+          const { type, ...entity } = payload;
+          validResults.push(entity);
+        } else if (isRelation(payload)) {
+          const { type, ...relation } = payload;
+          validResults.push(relation);
+        }
+      }
+  
+      return validResults;
     }
 
-    return validResults;
-  }
 
   async deleteEntity(entityName: string) {
     await this.connect();
@@ -518,91 +537,99 @@ export class QdrantPersistence {
   }
 
   // Enhanced search with filters
-  async searchWithFilters(query: string, filters?: any, limit: number = 10) {
-    await this.connect();
-    if (!COLLECTION_NAME) {
-      throw new Error("COLLECTION_NAME environment variable is required");
+  async searchWithFilters(query: string, filters?: SearchFilters, limit: number = 10, scoreThreshold?: number) {
+      await this.connect();
+      if (!COLLECTION_NAME) {
+        throw new Error("COLLECTION_NAME environment variable is required");
+      }
+  
+      const queryVector = await this.generateEmbedding(query);
+      
+      // Build Qdrant filter conditions
+      const filterConditions: any = {};
+      
+      if (filters) {
+        const mustConditions: any[] = [];
+        
+        if (filters.entity_types?.length) {
+          // Handle both single entity types and arrays
+          mustConditions.push({
+            key: "entityType",
+            match: {
+              any: filters.entity_types
+            }
+          });
+        }
+        
+        if (filters.domains?.length) {
+          mustConditions.push({
+            key: "metadata.domain",
+            match: {
+              any: filters.domains
+            }
+          });
+        }
+        
+        if (filters.tags?.length) {
+          mustConditions.push({
+            key: "metadata.tags",
+            match: {
+              any: filters.tags
+            }
+          });
+        }
+        
+        if (filters.date_range) {
+          mustConditions.push({
+            key: "metadata.created_at",
+            range: {
+              gte: filters.date_range.start,
+              lte: filters.date_range.end
+            }
+          });
+        }
+        
+        if (mustConditions.length > 0) {
+          filterConditions.must = mustConditions;
+        }
+      }
+  
+      const searchParams: any = {
+        vector: queryVector,
+        limit,
+        with_payload: true,
+        // Use 3x oversampling for better accuracy with binary quantization
+        params: {
+          oversampling: 3.0,
+        },
+        // Optional score threshold for filtering low-confidence results
+        ...(scoreThreshold && { score_threshold: scoreThreshold }),
+      };
+      
+      if (Object.keys(filterConditions).length > 0) {
+        searchParams.filter = filterConditions;
+      }
+  
+      const results = await this.client.search(COLLECTION_NAME, searchParams);
+  
+      const validResults: Array<Entity | Relation> = [];
+      for (const result of results) {
+        if (!result.payload) continue;
+  
+        const payload = result.payload as unknown as Payload;
+  
+        if (isEntity(payload)) {
+          const { type, ...entity } = payload;
+          validResults.push(entity);
+        } else if (isRelation(payload)) {
+          const { type, ...relation } = payload;
+          validResults.push(relation);
+        }
+      }
+  
+      return validResults;
     }
 
-    const queryVector = await this.generateEmbedding(query);
-    
-    // Build Qdrant filter conditions
-    const filterConditions: any = {};
-    
-    if (filters) {
-      const mustConditions: any[] = [];
-      
-      if (filters.entity_types?.length) {
-        mustConditions.push({
-          key: "entityType",
-          match: {
-            any: filters.entity_types
-          }
-        });
-      }
-      
-      if (filters.domains?.length) {
-        mustConditions.push({
-          key: "metadata.domain",
-          match: {
-            any: filters.domains
-          }
-        });
-      }
-      
-      if (filters.tags?.length) {
-        mustConditions.push({
-          key: "metadata.tags",
-          match: {
-            any: filters.tags
-          }
-        });
-      }
-      
-      if (filters.date_range) {
-        mustConditions.push({
-          key: "metadata.created_at",
-          range: {
-            gte: filters.date_range.start,
-            lte: filters.date_range.end
-          }
-        });
-      }
-      
-      if (mustConditions.length > 0) {
-        filterConditions.must = mustConditions;
-      }
-    }
-
-    const searchParams: any = {
-      vector: queryVector,
-      limit,
-      with_payload: true
-    };
-    
-    if (Object.keys(filterConditions).length > 0) {
-      searchParams.filter = filterConditions;
-    }
-
-    const results = await this.client.search(COLLECTION_NAME, searchParams);
-
-    const validResults: Array<Entity | Relation> = [];
-    for (const result of results) {
-      if (!result.payload) continue;
-
-      const payload = result.payload as unknown as Payload;
-
-      if (isEntity(payload)) {
-        const { type, ...entity } = payload;
-        validResults.push(entity);
-      } else if (isRelation(payload)) {
-        const { type, ...relation } = payload;
-        validResults.push(relation);
-      }
-    }
-
-    return validResults;
-  }
 
   // Get relationships by type
   async getRelationshipsByType(relationshipType: string, limit: number = 100) {
