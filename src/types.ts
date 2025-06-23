@@ -24,6 +24,36 @@ export type RelationType =
   | 'similar_to'    // Similarity relationship
   | 'opposite_of';  // Opposition relationship
 
+// Meta-learning types
+export type LearningType = 'failure' | 'success' | 'optimization' | 'insight';
+export type ImpactLevel = 'low' | 'medium' | 'high' | 'transformative';
+export type ApplicationOutcome = 'successful' | 'failed' | 'partially_successful';
+
+// Store meta-learning request interface
+export interface StoreMetaLearningRequest {
+  principle: string;
+  learning_type: LearningType;
+  trigger_situation: string;
+  observed_behavior: string;
+  recommended_behavior: string;
+  specific_example: string;
+  tags: string[];
+  domain?: string;
+  impact?: ImpactLevel;
+  project_context?: string;
+  prevention_pattern?: string;
+  success_metric?: string;
+  is_general?: boolean;
+}
+
+// Track meta-learning application request interface
+export interface TrackMetaLearningApplicationRequest {
+  principle_name: string;
+  application_context: string;
+  outcome: ApplicationOutcome;
+  details: string;
+  lessons_learned?: string;
+}
 export interface EntityMetadata {
   id?: string;
   created_at: string;
@@ -33,6 +63,18 @@ export interface EntityMetadata {
   content?: string; // For storing exact raw content separately from observations
 }
 
+// Input metadata interfaces (without auto-generated fields)
+export interface EntityMetadataInput {
+  tags?: string[];
+  domain?: string;
+  content?: string;
+}
+
+export interface RelationshipMetadataInput {
+  strength?: number;
+  context?: string;
+  evidence?: string[];
+}
 export interface RelationshipMetadata {
   id?: string;
   strength?: number; // 0.0-1.0 confidence/importance score

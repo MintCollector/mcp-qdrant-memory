@@ -239,3 +239,135 @@ export function validateSemanticSearchRequest(args: unknown): SearchSimilarReque
   return { query, limit };
 }
 
+export function validateStoreMetaLearningRequest(args: unknown): import('./types.js').StoreMetaLearningRequest {
+  if (!isRecord(args)) {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid request format");
+  }
+
+  const { 
+    principle, 
+    learning_type, 
+    trigger_situation, 
+    observed_behavior, 
+    recommended_behavior, 
+    specific_example, 
+    tags,
+    domain,
+    impact,
+    project_context,
+    prevention_pattern,
+    success_metric
+  } = args;
+
+  // Validate required fields
+  if (typeof principle !== 'string' || principle.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid principle");
+  }
+
+  const validLearningTypes = ['failure', 'success', 'optimization', 'insight'];
+  if (typeof learning_type !== 'string' || !validLearningTypes.includes(learning_type)) {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid learning_type (must be: failure, success, optimization, insight)");
+  }
+
+  if (typeof trigger_situation !== 'string' || trigger_situation.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid trigger_situation");
+  }
+
+  if (typeof observed_behavior !== 'string' || observed_behavior.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid observed_behavior");
+  }
+
+  if (typeof recommended_behavior !== 'string' || recommended_behavior.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid recommended_behavior");
+  }
+
+  if (typeof specific_example !== 'string' || specific_example.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid specific_example");
+  }
+
+  if (!isStringArray(tags) || tags.length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid tags array");
+  }
+
+  // Validate optional fields
+  if (domain !== undefined && typeof domain !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid domain (must be string)");
+  }
+
+  const validImpactLevels = ['low', 'medium', 'high', 'transformative'];
+  if (impact !== undefined && (typeof impact !== 'string' || !validImpactLevels.includes(impact))) {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid impact (must be: low, medium, high, transformative)");
+  }
+
+  if (project_context !== undefined && typeof project_context !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid project_context (must be string)");
+  }
+
+  if (prevention_pattern !== undefined && typeof prevention_pattern !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid prevention_pattern (must be string)");
+  }
+
+  if (success_metric !== undefined && typeof success_metric !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid success_metric (must be string)");
+  }
+
+  return {
+    principle: principle.trim(),
+    learning_type: learning_type as import('./types.js').LearningType,
+    trigger_situation: trigger_situation.trim(),
+    observed_behavior: observed_behavior.trim(),
+    recommended_behavior: recommended_behavior.trim(),
+    specific_example: specific_example.trim(),
+    tags: tags.map(tag => tag.trim()).filter(tag => tag.length > 0),
+    domain: domain?.trim(),
+    impact: impact as import('./types.js').ImpactLevel | undefined,
+    project_context: project_context?.trim(),
+    prevention_pattern: prevention_pattern?.trim(),
+    success_metric: success_metric?.trim()
+  };
+}
+
+export function validateTrackMetaLearningApplicationRequest(args: unknown): import('./types.js').TrackMetaLearningApplicationRequest {
+  if (!isRecord(args)) {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid request format");
+  }
+
+  const { 
+    principle_name, 
+    application_context, 
+    outcome, 
+    details,
+    lessons_learned
+  } = args;
+
+  // Validate required fields
+  if (typeof principle_name !== 'string' || principle_name.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid principle_name");
+  }
+
+  if (typeof application_context !== 'string' || application_context.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid application_context");
+  }
+
+  const validOutcomes = ['successful', 'failed', 'partially_successful'];
+  if (typeof outcome !== 'string' || !validOutcomes.includes(outcome)) {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid outcome (must be: successful, failed, partially_successful)");
+  }
+
+  if (typeof details !== 'string' || details.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, "Missing or invalid details");
+  }
+
+  // Validate optional fields
+  if (lessons_learned !== undefined && typeof lessons_learned !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, "Invalid lessons_learned (must be string)");
+  }
+
+  return {
+    principle_name: principle_name.trim(),
+    application_context: application_context.trim(),
+    outcome: outcome as import('./types.js').ApplicationOutcome,
+    details: details.trim(),
+    lessons_learned: lessons_learned?.trim()
+  };
+}

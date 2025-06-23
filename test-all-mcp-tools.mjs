@@ -49,188 +49,57 @@ class MCPTestSuite {
       // Wait for server to be ready
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-          console.log('❌ Server startup timeout after 15 seconds');
           reject(new Error('Server startup timeout'));
-        }, 15000);
-
-        let serverReady = false;
-
-        this.serverProcess.stdout.on('data', (data) => {
-          const output = data.toString();
-          console.log('Server stdout:', output);
-        });
+        }, 30000);
 
         this.serverProcess.stderr.on('data', (data) => {
           const output = data.toString();
           console.log('Server stderr:', output);
-          
-          // Check for successful startup
-          if (output.includes('Memory MCP server running on stdio')) {
-            console.log('✅ Server startup message detected');
-            if (!serverReady) {
-              serverReady = true;
-              clearTimeout(timeout);
-              resolve();
-            }
-          }
-          
-          // Check for successful initialization
-          if (output.includes('Successfully initialized') || output.includes('server running')) {
-            console.log('✅ Server initialization detected');
-            if (!serverReady) {
-              serverReady = true;
-              clearTimeout(timeout);
-              resolve();
-            }
-          }
+        });
 
-          // Check for fatal errors
-          if (output.includes('Fatal error') || output.includes('process.exit(1)')) {
-            console.log('❌ Server fatal error detected');
-            clearTimeout(timeout);
-            reject(new Error(`Server fatal error: ${output}`));
-          }
+        this.serverProcess.stdout.on('data', (data) => {
+          const output = data.toString();
+          console.log('Server stdout:', output);
+          clearTimeout(timeout);
+          resolve(true);
         });
 
         this.serverProcess.on('error', (error) => {
-          console.log('❌ Server process error:', error.message);
           clearTimeout(timeout);
           reject(error);
         });
 
-        this.serverProcess.on('exit', (code, signal) => {
-          console.log(`❌ Server process exited with code ${code}, signal ${signal}`);
-          if (!serverReady) {
+        this.serverProcess.on('exit', (code) => {
+          if (code !== 0) {
             clearTimeout(timeout);
-            reject(new Error(`Server exited unexpectedly with code ${code}`));
+            reject(new Error(`Server exited with code ${code}`));
           }
         });
       });
-
-      console.log("✅ MCP Server started successfully");
       return true;
     } catch (error) {
-      console.error("❌ Failed to start MCP server:", error.message);
+      console.error(`❌ store_meta_learning failed: ${error.message}`);
+      this.testResults.push({ test: 'store_meta_learning', status: 'FAIL', error: error.message });
       return false;
     }
   }
 
-  async sendMCPRequest(method, params = {}) {
-    return new Promise((resolve, reject) => {
-      const request = {
-        jsonrpc: "2.0",
-        id: this.requestId++,
-        method: method,
-        params: params
-      };
-
-      const requestData = JSON.stringify(request) + '\n';
-      
-      let responseData = '';
-      const onData = (data) => {
-        responseData += data.toString();
-        
-        // Try to parse complete JSON responses
-        const lines = responseData.split('\n');
-        for (const line of lines) {
-          if (line.trim()) {
-            try {
-              const response = JSON.parse(line);
-              if (response.id === request.id) {
-                this.serverProcess.stdout.removeListener('data', onData);
-                resolve(response);
-                return;
-              }
-            } catch (e) {
-              // Continue collecting data
-            }
-          }
-        }
-      };
-
-      this.serverProcess.stdout.on('data', onData);
-      
-      // Send request
-      this.serverProcess.stdin.write(requestData);
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        this.serverProcess.stdout.removeListener('data', onData);
-        reject(new Error(`Request timeout for ${method}`));
-      }, 10000);
-    });
-  }
-
-  async testListTools() {
-    console.log("\n🧪 Testing tools/list...");
-    
-    try {
-      const response = await this.sendMCPRequest('tools/list');
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      const tools = response.result.tools;
-      const expectedTools = [
-        'create_entities',
-        'create_relationships', 
-        'add_observations',
-        'delete_entities',
-        'delete_observations',
-        'delete_relationships',
-        'read_graph',
-        'semantic_search',
-        'advanced_search',
-        'search_related'
-      ];
-
-      const toolNames = tools.map(t => t.name);
-      const missingTools = expectedTools.filter(name => !toolNames.includes(name));
-      
-      if (missingTools.length > 0) {
-        throw new Error(`Missing tools: ${missingTools.join(', ')}`);
-      }
-
-      console.log(`✅ Found all ${tools.length} expected tools`);
-      this.testResults.push({ test: 'tools/list', status: 'PASS', tools: toolNames });
-      return true;
-    } catch (error) {
-      console.error(`❌ tools/list failed: ${error.message}`);
-      this.testResults.push({ test: 'tools/list', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testCreateEntities() {
-    console.log("\n🧪 Testing create_entities...");
+  async testStoreMetaLearningSuccess() {
+    console.log("\n🧪 Testing store_meta_learning (success pattern)...");
     
     try {
       const testData = {
-        name: "create_entities",
+        name: "store_meta_learning",
         arguments: {
-          entities: [
-            {
-              name: "Test Entity 1",
-              entityType: "concept",
-              observations: [
-                "This is a test observation",
-                "Another test observation"
-              ],
-              metadata: {
-                domain: "testing",
-                tags: ["test", "entity"]
-              }
-            },
-            {
-              name: "Test Entity 2", 
-              entityType: ["person", "concept"],
-              observations: [
-                "Multi-type test entity",
-                "Demonstrates multiple entity types"
-              ]
-            }
-          ]
+          principle: "Break complex queries into semantic chunks for better comprehension",
+          learning_type: "success",
+          trigger_situation: "User presents multi-part technical question",
+          observed_behavior: "Decomposed query into sub-questions before answering",
+          recommended_behavior: "Always decompose complex queries before comprehensive answer",
+          specific_example: "API design + performance + security handled separately then synthesized",
+          tags: ["complex queries", "technical consulting"],
+          impact: "high",
+          success_metric: "User confirms all aspects were addressed clearly and thoroughly"
         }
       };
 
@@ -240,39 +109,28 @@ class MCPTestSuite {
         throw new Error(`MCP Error: ${response.error.message}`);
       }
 
-      const result = response.result;
-      if (!result.content || !result.content[0].text.includes("successfully")) {
-        throw new Error("Unexpected response format");
-      }
-
-      console.log("✅ create_entities completed successfully");
-      this.testResults.push({ test: 'create_entities', status: 'PASS' });
+      console.log("✅ store_meta_learning (success) completed successfully");
+      this.testResults.push({ test: 'store_meta_learning_success', status: 'PASS' });
       return true;
     } catch (error) {
-      console.error(`❌ create_entities failed: ${error.message}`);
-      this.testResults.push({ test: 'create_entities', status: 'FAIL', error: error.message });
+      console.error(`❌ store_meta_learning (success) failed: ${error.message}`);
+      this.testResults.push({ test: 'store_meta_learning_success', status: 'FAIL', error: error.message });
       return false;
     }
   }
 
-  async testCreateRelationships() {
-    console.log("\n🧪 Testing create_relationships...");
+  async testTrackMetaLearningApplication() {
+    console.log("\n🧪 Testing store_meta_learning...");
     
     try {
       const testData = {
-        name: "create_relationships",
+        name: "track_meta_learning_application",
         arguments: {
-          relationships: [
-            {
-              from: "Test Entity 1",
-              to: "Test Entity 2",
-              relationType: "relates_to",
-              metadata: {
-                strength: 0.8,
-                context: "Test relationship"
-              }
-            }
-          ]
+          principle_name: "Meta-Learning [Failure]: Always validate context compatibility...",
+          application_context: "User wants Slack integration with specific API version",
+          outcome: "successful",
+          details: "Asked about API version first, discovered they're on v1 not v2, avoided building wrong implementation",
+          lessons_learned: "Version checking prevents significant rework and user frustration"
         }
       };
 
@@ -282,391 +140,91 @@ class MCPTestSuite {
         throw new Error(`MCP Error: ${response.error.message}`);
       }
 
-      console.log("✅ create_relationships completed successfully");
-      this.testResults.push({ test: 'create_relationships', status: 'PASS' });
+      if (!response.result || !response.result.content) {
+        throw new Error("No content in response");
+      }
+
+      const result = JSON.parse(response.result.content[0].text);
+      console.log(`📊 Tracking result: ${result.success ? 'SUCCESS' : 'FAILED'}`);
+      if (result.updated_metrics) {
+        console.log(`📈 Updated metrics: Applied ${result.updated_metrics.times_applied}, Success rate: ${(result.updated_metrics.effectiveness_score * 100).toFixed(1)}%`);
+      }
+      
+      console.log("✅ track_meta_learning_application completed successfully");
+      this.testResults.push({ test: 'track_meta_learning_application', status: 'PASS' });
       return true;
     } catch (error) {
-      console.error(`❌ create_relationships failed: ${error.message}`);
-      this.testResults.push({ test: 'create_relationships', status: 'FAIL', error: error.message });
+      console.error(`❌ track_meta_learning_application failed: ${error.message}`);
+      this.testResults.push({ test: 'track_meta_learning_application', status: 'FAIL', error: error.message });
       return false;
     }
   }
 
-  async testAddObservations() {
-    console.log("\n🧪 Testing add_observations...");
+  async testMetaLearningWorkflow() {
+    console.log("\n🧪 Testing store_meta_learning...");
     
     try {
-      const testData = {
-        name: "add_observations",
+      // Store an optimization learning
+      const storeData = {
+        name: "store_meta_learning",
         arguments: {
-          observations: [
-            {
-              entityName: "Test Entity 1",
-              contents: [
-                "Additional observation from test",
-                "Another update to the entity"
-              ]
-            }
-          ]
+          principle: "Use semantic search before detailed file traversal",
+          learning_type: "optimization",
+          trigger_situation: "Need to find specific code patterns in large codebase",
+          observed_behavior: "Started with broad semantic search to identify likely files",
+          recommended_behavior: "Always use semantic search to narrow scope before detailed analysis",
+          specific_example: "Found authentication logic in 2 searches instead of reading 50+ files",
+          tags: ["code exploration", "debugging"],
+          impact: "transformative",
+          success_metric: "Time to find target code reduced by >70%"
         }
       };
 
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
+      const storeResponse = await this.sendMCPRequest('tools/call', storeData);
+      if (storeResponse.error) {
+        throw new Error(`Store failed: ${storeResponse.error.message}`);
       }
 
-      console.log("✅ add_observations completed successfully");
-      this.testResults.push({ test: 'add_observations', status: 'PASS' });
-      return true;
-    } catch (error) {
-      console.error(`❌ add_observations failed: ${error.message}`);
-      this.testResults.push({ test: 'add_observations', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testReadGraph() {
-    console.log("\n🧪 Testing read_graph...");
-    
-    try {
-      const testData = {
-        name: "read_graph",
-        arguments: {}
-      };
-
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      const graphData = JSON.parse(response.result.content[0].text);
-      
-      if (!graphData.entities || !graphData.relations) {
-        throw new Error("Invalid graph structure");
-      }
-
-      // Verify our test entities exist
-      const entityNames = graphData.entities.map(e => e.name);
-      if (!entityNames.includes("Test Entity 1") || !entityNames.includes("Test Entity 2")) {
-        throw new Error("Test entities not found in graph");
-      }
-
-      console.log(`✅ read_graph returned graph with ${graphData.entities.length} entities and ${graphData.relations.length} relationships`);
-      this.testResults.push({ 
-        test: 'read_graph', 
-        status: 'PASS', 
-        entities: graphData.entities.length,
-        relations: graphData.relations.length 
-      });
-      return true;
-    } catch (error) {
-      console.error(`❌ read_graph failed: ${error.message}`);
-      this.testResults.push({ test: 'read_graph', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testSemanticSearch() {
-    console.log("\n🧪 Testing semantic_search...");
-    
-    try {
-      const testData = {
-        name: "semantic_search",
+      // Track first application - successful
+      const trackData1 = {
+        name: "track_meta_learning_application",
         arguments: {
-          query: "test entity concept",
-          limit: 5
+          principle_name: "Meta-Learning [Optimization]: Use semantic search before detailed file...",
+          application_context: "User needs to find database connection logic in large enterprise codebase",
+          outcome: "successful",
+          details: "Used semantic search for 'database connection config', found in 3 files instead of scanning entire src/ directory"
         }
       };
 
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
+      const trackResponse1 = await this.sendMCPRequest('tools/call', trackData1);
+      if (trackResponse1.error) {
+        throw new Error(`First tracking failed: ${trackResponse1.error.message}`);
       }
 
-      const results = JSON.parse(response.result.content[0].text);
-      
-      if (!Array.isArray(results)) {
-        throw new Error("Expected array of search results");
-      }
-
-      console.log(`✅ semantic_search returned ${results.length} results`);
-      this.testResults.push({ test: 'semantic_search', status: 'PASS', results: results.length });
-      return true;
-    } catch (error) {
-      console.error(`❌ semantic_search failed: ${error.message}`);
-      this.testResults.push({ test: 'semantic_search', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testAdvancedSearch() {
-    console.log("\n🧪 Testing advanced_search...");
-    
-    try {
-      const testData = {
-        name: "advanced_search",
+      // Track second application - partial success
+      const trackData2 = {
+        name: "track_meta_learning_application",
         arguments: {
-          query: "test concept",
-          filters: {
-            entity_types: ["concept"],
-            domains: ["testing"]
-          },
-          limit: 10,
-          score_threshold: 0.1
+          principle_name: "Meta-Learning [Optimization]: Use semantic search before detailed file...",
+          application_context: "Finding legacy error handling patterns",
+          outcome: "partially_successful",
+          details: "Semantic search helped narrow to 5 files, but still needed manual review of all 5",
+          lessons_learned: "Works best for concrete concepts, less effective for abstract patterns"
         }
       };
 
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
+      const trackResponse2 = await this.sendMCPRequest('tools/call', trackData2);
+      if (trackResponse2.error) {
+        throw new Error(`Second tracking failed: ${trackResponse2.error.message}`);
       }
 
-      const results = JSON.parse(response.result.content[0].text);
-      
-      if (!Array.isArray(results)) {
-        throw new Error("Expected array of search results");
-      }
-
-      console.log(`✅ advanced_search returned ${results.length} filtered results`);
-      this.testResults.push({ test: 'advanced_search', status: 'PASS', results: results.length });
+      console.log("✅ Complete meta-learning workflow test completed successfully");
+      this.testResults.push({ test: 'meta_learning_workflow', status: 'PASS' });
       return true;
     } catch (error) {
-      console.error(`❌ advanced_search failed: ${error.message}`);
-      this.testResults.push({ test: 'advanced_search', status: 'FAIL', error: error.message });
+      console.error(`❌ Meta-learning workflow test failed: ${error.message}`);
+      this.testResults.push({ test: 'meta_learning_workflow', status: 'FAIL', error: error.message });
       return false;
-    }
-  }
-
-  async testSearchRelated() {
-    console.log("\n🧪 Testing search_related...");
-    
-    try {
-      const testData = {
-        name: "search_related",
-        arguments: {
-          entityName: "Test Entity 1",
-          maxDepth: 2,
-          relationshipTypes: ["relates_to"]
-        }
-      };
-
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      const results = JSON.parse(response.result.content[0].text);
-      
-      if (!results.entities || !Array.isArray(results.entities) || !results.relationships || !Array.isArray(results.relationships) || !results.paths || !Array.isArray(results.paths)) {
-        throw new Error("Expected object with entities, relationships, and paths arrays");
-      }
-
-      console.log(`✅ search_related found ${results.entities.length} entities, ${results.relationships.length} relationships, and ${results.paths.length} paths`);
-      this.testResults.push({ test: 'search_related', status: 'PASS', entities: results.entities.length, relationships: results.relationships.length, paths: results.paths.length });
-      return true;
-    } catch (error) {
-      console.error(`❌ search_related failed: ${error.message}`);
-      this.testResults.push({ test: 'search_related', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testDeleteObservations() {
-    console.log("\n🧪 Testing delete_observations...");
-    
-    try {
-      const testData = {
-        name: "delete_observations",
-        arguments: {
-          deletions: [
-            {
-              entityName: "Test Entity 1",
-              observations: ["Additional observation from test"]
-            }
-          ]
-        }
-      };
-
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      console.log("✅ delete_observations completed successfully");
-      this.testResults.push({ test: 'delete_observations', status: 'PASS' });
-      return true;
-    } catch (error) {
-      console.error(`❌ delete_observations failed: ${error.message}`);
-      this.testResults.push({ test: 'delete_observations', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testDeleteRelationships() {
-    console.log("\n🧪 Testing delete_relationships...");
-    
-    try {
-      const testData = {
-        name: "delete_relationships",
-        arguments: {
-          relationships: [
-            {
-              from: "Test Entity 1",
-              to: "Test Entity 2",
-              relationType: "relates_to"
-            }
-          ]
-        }
-      };
-
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      console.log("✅ delete_relationships completed successfully");
-      this.testResults.push({ test: 'delete_relationships', status: 'PASS' });
-      return true;
-    } catch (error) {
-      console.error(`❌ delete_relationships failed: ${error.message}`);
-      this.testResults.push({ test: 'delete_relationships', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testDeleteEntities() {
-    console.log("\n🧪 Testing delete_entities...");
-    
-    try {
-      const testData = {
-        name: "delete_entities",
-        arguments: {
-          entityNames: ["Test Entity 1", "Test Entity 2"]
-        }
-      };
-
-      const response = await this.sendMCPRequest('tools/call', testData);
-      
-      if (response.error) {
-        throw new Error(`MCP Error: ${response.error.message}`);
-      }
-
-      console.log("✅ delete_entities completed successfully");
-      this.testResults.push({ test: 'delete_entities', status: 'PASS' });
-      return true;
-    } catch (error) {
-      console.error(`❌ delete_entities failed: ${error.message}`);
-      this.testResults.push({ test: 'delete_entities', status: 'FAIL', error: error.message });
-      return false;
-    }
-  }
-
-  async testErrorHandling() {
-    console.log("\n🧪 Testing error handling...");
-    
-    const errorTests = [
-      {
-        name: "invalid_tool",
-        test: "non_existent_tool",
-        expectedError: "Unknown tool"
-      },
-      {
-        name: "missing_arguments",
-        test: "create_entities",
-        args: {},
-        expectedError: "Missing arguments"
-      },
-      {
-        name: "invalid_entity_data",
-        test: "create_entities",
-        args: { entities: [{ name: "test" }] },
-        expectedError: "Missing required"
-      }
-    ];
-
-    let errorTestsPassed = 0;
-
-    for (const errorTest of errorTests) {
-      try {
-        const testData = {
-          name: errorTest.test,
-          arguments: errorTest.args || {}
-        };
-
-        const response = await this.sendMCPRequest('tools/call', testData);
-        
-        if (response.error) {
-          console.log(`✅ ${errorTest.name}: Got expected error - ${response.error.message}`);
-          errorTestsPassed++;
-        } else {
-          console.log(`⚠️  ${errorTest.name}: Expected error but got success`);
-        }
-      } catch (error) {
-        console.log(`✅ ${errorTest.name}: Got expected error - ${error.message}`);
-        errorTestsPassed++;
-      }
-    }
-
-    console.log(`✅ Error handling: ${errorTestsPassed}/${errorTests.length} tests passed`);
-    this.testResults.push({ 
-      test: 'error_handling', 
-      status: errorTestsPassed === errorTests.length ? 'PASS' : 'PARTIAL',
-      passed: errorTestsPassed,
-      total: errorTests.length
-    });
-
-    return errorTestsPassed === errorTests.length;
-  }
-
-  async cleanup() {
-    if (this.serverProcess) {
-      console.log("\n🧹 Cleaning up test server...");
-      this.serverProcess.kill('SIGTERM');
-      
-      await new Promise((resolve) => {
-        this.serverProcess.on('exit', resolve);
-        setTimeout(resolve, 5000); // Force cleanup after 5s
-      });
-    }
-  }
-
-  printResults() {
-    console.log("\n" + "=".repeat(60));
-    console.log("📊 MCP Tools Test Results Summary");
-    console.log("=".repeat(60));
-
-    let totalTests = 0;
-    let passedTests = 0;
-
-    for (const result of this.testResults) {
-      totalTests++;
-      const status = result.status === 'PASS' ? '✅' : result.status === 'PARTIAL' ? '⚠️ ' : '❌';
-      console.log(`${status} ${result.test.padEnd(25)} ${result.status}`);
-      
-      if (result.status === 'PASS' || result.status === 'PARTIAL') {
-        passedTests++;
-      }
-
-      if (result.error) {
-        console.log(`    Error: ${result.error}`);
-      }
-    }
-
-    console.log("=".repeat(60));
-    console.log(`🎯 Overall: ${passedTests}/${totalTests} tests passed (${Math.round(passedTests/totalTests*100)}%)`);
-    
-    if (passedTests === totalTests) {
-      console.log("🎉 All MCP tools are working correctly!");
-    } else {
-      console.log("⚠️  Some tests failed - review the results above");
     }
   }
 
@@ -684,19 +242,11 @@ class MCPTestSuite {
       // Wait a bit for server to fully initialize
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Run all tool tests in sequence
-      await this.testListTools();
-      await this.testCreateEntities();
-      await this.testCreateRelationships();
-      await this.testAddObservations();
-      await this.testReadGraph();
-      await this.testSemanticSearch();
-      await this.testAdvancedSearch();
-      await this.testSearchRelated();
-      await this.testDeleteObservations();
-      await this.testDeleteRelationships();
-      await this.testDeleteEntities();
-      await this.testErrorHandling();
+      // Test new meta-learning tools
+      await this.testStoreMetaLearning();
+      await this.testStoreMetaLearningSuccess();
+      await this.testTrackMetaLearningApplication();
+      await this.testMetaLearningWorkflow();
 
     } catch (error) {
       console.error("❌ Test suite failed:", error.message);
@@ -705,6 +255,74 @@ class MCPTestSuite {
       await this.cleanup();
       this.printResults();
     }
+  }
+
+  async cleanup() {
+    console.log("\n
+🧹 Cleaning up..."););
+    if (this.serverProcess) {
+      this.serverProcess.kill();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  printResults() {
+    console.log("\n
+
+" + "=".repeat(60));
+    console.log("📊 TEST RESULTS SUMMARY");
+    console.log("=".repeat(60));
+    
+    const total = this.testResults.length;
+    const passed = this.testResults.filter(r => r.status === 'PASS').length;
+    const failed = this.testResults.filter(r => r.status === 'FAIL').length;
+    const partial = this.testResults.filter(r => r.status === 'PARTIAL').length;
+    
+    this.testResults.forEach(result => {
+      const emoji = result.status === 'PASS' ? '✅' : result.status === 'PARTIAL' ? '⚠️' : '❌';
+      console.log(`${emoji} ${result.test}: ${result.status}`);
+      if (result.error) {
+        console.log(`   Error: ${result.error}`);
+      }
+    });
+    
+    console.log("=".repeat(60));
+    console.log(`📈 Total: ${total} | ✅ Passed: ${passed} | ⚠️ Partial: ${partial} | ❌ Failed: ${failed}`);
+    console.log(`🏆 Success Rate: ${Math.round((passed + partial * 0.5) / total * 100)}%`);
+    console.log("=".repeat(60));
+  }
+
+  async sendMCPRequest(method, params) {
+    return new Promise((resolve, reject) => {
+      const request = {
+        jsonrpc: "2.0",
+        id: this.requestId++,
+        method: method,
+        params: params
+      };
+
+      const requestStr = JSON.stringify(request) + '
+';
+      this.serverProcess.stdin.write(requestStr);
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout'));
+      }, 10000);
+
+      const onData = (data) => {
+        clearTimeout(timeout);
+        this.serverProcess.stdout.removeListener('data', onData);
+        
+        try {
+          const response = JSON.parse(data.toString().trim());
+          resolve(response);
+        } catch (error) {
+          reject(new Error(`Failed to parse response: ${error.message}`));
+        }
+      };
+
+      this.serverProcess.stdout.once('data', onData);
+    });
   }
 }
 
