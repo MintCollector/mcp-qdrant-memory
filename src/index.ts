@@ -279,7 +279,7 @@ class MemoryServer {
         },
         {
           name: "semantic_search",
-          description: "Find semantically similar entities and relationships using AI embeddings. Use for discovering related concepts. Input: {query: string, limit?: number}",
+          description: "Find semantically similar entities and relationships using AI embeddings. Returns results in two categories: 'search_results' (all types, limited) and optionally 'general_meta_learnings' (ordered by relevance). Input: {query: string, limit?: number, include_general_meta_learnings?: boolean}",
           inputSchema: {
             type: "object",
             properties: {
@@ -287,6 +287,11 @@ class MemoryServer {
               limit: { 
                 type: "number",
                 default: 10
+              },
+              include_general_meta_learnings: {
+                type: "boolean",
+                default: true,
+                description: "Include general meta-learnings in response"
               }
             },
             required: ["query"]
@@ -468,16 +473,58 @@ class MemoryServer {
           }
 
           case "semantic_search": {
-            const args = validateSemanticSearchRequest(request.params.arguments);
-            const results = await this.graphManager.searchSimilar(
-              args.query,
-              args.limit
+            const args = request.params.arguments as any;
+            const query = args.query;
+            const limit = args.limit || 10;
+            const includeGeneralMeta = args.include_general_meta_learnings !== false; // Default true
+            
+            // Get search results for all entity types
+            const searchResults = await this.graphManager.searchSimilar(
+              query,
+              limit
             );
+            
+            let response: any = {
+              search_results: searchResults
+            };
+            
+            // If requested, get general meta-learnings ordered by relevance
+            if (includeGeneralMeta) {
+              // Get all entities to find general meta-learnings
+              const graph = await this.graphManager.getGraph();
+              const generalMetaLearnings = graph.entities.filter(entity => {
+                const isMetaLearning = Array.isArray(entity.entityType) 
+                  ? entity.entityType.includes("meta_learning")
+                  : entity.entityType === "meta_learning";
+                const entityMetadata = entity.metadata as import('./types.js').EntityMetadata | undefined;
+                const hasGeneralTag = entityMetadata?.tags?.includes("general");
+                return isMetaLearning && hasGeneralTag;
+              });
+              
+              // If we have general meta-learnings, search them for relevance
+              if (generalMetaLearnings.length > 0) {
+                // Use semantic search to order general meta-learnings by relevance
+                const generalSearchResults = await this.graphManager.searchSimilar(
+                  query,
+                  generalMetaLearnings.length + 10 // Get extra to ensure we find all generals
+                );
+                
+                // Filter to only include the general meta-learnings, maintaining order
+                const orderedGeneralMeta = generalSearchResults.filter(result => {
+                  return generalMetaLearnings.some(gm => gm.id === result.id);
+                });
+                
+                response.general_meta_learnings = orderedGeneralMeta;
+              } else {
+                response.general_meta_learnings = [];
+              }
+            }
+            
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(results, null, 2),
+                  text: JSON.stringify(response, null, 2),
                 },
               ],
             };
@@ -1022,9 +1069,16 @@ class MemoryServer {
       
       ### 8. semantic_search
       **PURPOSE**: Find semantically similar content using AI embeddings (searches vector database)
-      **INPUT**: \`{query: string, limit?: number}\`
-      **BEST FOR**: Discovering related concepts, exploring similar ideas
-      **EXAMPLE**: "memory techniques for better learning"
+      **INPUT**: \`{query: string, limit?: number, include_general_meta_learnings?: boolean}\`
+      **OUTPUT STRUCTURE**: 
+      \`\`\`json
+      {
+        "search_results": [...],           // All entity types (limited by limit parameter)
+        "general_meta_learnings": [...]    // Optional: General meta-learnings ordered by relevance
+      }
+      \`\`\`
+      **BEST FOR**: Discovering related concepts while keeping important context available
+      **EXAMPLE**: Query "API design" returns API-related entities + relevant personality/preference meta-learnings
       
       ### 9. advanced_search
       **PURPOSE**: Advanced semantic search with filtering capabilities (combines AI similarity with precise filtering)
@@ -1093,7 +1147,7 @@ class MemoryServer {
       ## Search Strategy Guide
       
       ### When to use each search tool:
-      - **semantic_search**: "Find concepts similar to X" (AI similarity)
+      - **semantic_search**: "Find concepts similar to X" (AI similarity + optional general meta-learnings)
       - **advanced_search**: "Find X with specific criteria" (AI + filtering)  
       - **search_related**: "Show me what connects to X" (graph traversal)
       
