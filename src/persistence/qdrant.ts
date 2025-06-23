@@ -91,59 +91,76 @@ export class QdrantPersistence {
   private initialized: boolean = false;
 
   constructor() {
-    if (!QDRANT_URL) {
-      throw new Error("QDRANT_URL environment variable is required");
-    }
-
-    // Validate QDRANT_URL format and protocol
-    if (
-      !QDRANT_URL.startsWith("http://") &&
-      !QDRANT_URL.startsWith("https://")
-    ) {
-      throw new Error("QDRANT_URL must start with http:// or https://");
-    }
-
-    this.client = new CustomQdrantClient(QDRANT_URL, QDRANT_API_KEY);
-
-    // Initialize the appropriate embedding provider
-    if (EMBEDDING_PROVIDER === "openai") {
-      this.openai = new OpenAI({
-        apiKey: OPENAI_API_KEY,
-      });
-    } else if (EMBEDDING_PROVIDER === "google") {
-      this.googleAI = new GoogleGenerativeAI(GOOGLE_API_KEY!);
-    }
-  }
-
-  async connect() {
-    if (this.initialized) return;
-
-    // Add retry logic for initial connection with exponential backoff
-    let retries = 3;
-    let delay = 2000; // Start with 2 second delay
-
-    while (retries > 0) {
-      try {
-        await this.client.getCollections();
-        this.initialized = true;
-        break;
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message : "Unknown Qdrant error";
-        console.error(`Connection attempt failed: ${message}`);
-        console.error("Full error:", error);
-
-        retries--;
-        if (retries === 0) {
-          throw new Error(
-            `Failed to connect to Qdrant after multiple attempts: ${message}`
-          );
+      if (!QDRANT_URL) {
+        console.warn("Warning: QDRANT_URL environment variable is required for vector search functionality");
+        // Create a dummy client that will fail gracefully
+        this.client = null as any;
+        return;
+      }
+  
+      // Validate QDRANT_URL format and protocol
+      if (
+        !QDRANT_URL.startsWith("http://") &&
+        !QDRANT_URL.startsWith("https://")
+      ) {
+        console.warn("Warning: QDRANT_URL must start with http:// or https://");
+        this.client = null as any;
+        return;
+      }
+  
+      this.client = new CustomQdrantClient(QDRANT_URL, QDRANT_API_KEY);
+  
+      // Initialize the appropriate embedding provider
+      if (EMBEDDING_PROVIDER === "openai") {
+        if (OPENAI_API_KEY) {
+          this.openai = new OpenAI({
+            apiKey: OPENAI_API_KEY,
+          });
+        } else {
+          console.warn("Warning: OpenAI API key missing, embeddings will not work");
         }
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        delay *= 2; // Exponential backoff
+      } else if (EMBEDDING_PROVIDER === "google") {
+        if (GOOGLE_API_KEY) {
+          this.googleAI = new GoogleGenerativeAI(GOOGLE_API_KEY);
+        } else {
+          console.warn("Warning: Google API key missing, embeddings will not work");
+        }
       }
     }
-  }
+
+
+  async connect() {
+      if (this.initialized || !this.client) return;
+  
+      // Add retry logic for initial connection with exponential backoff
+      let retries = 3;
+      let delay = 2000; // Start with 2 second delay
+  
+      while (retries > 0) {
+        try {
+          await this.client.getCollections();
+          this.initialized = true;
+          break;
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : "Unknown Qdrant error";
+          console.error(`Connection attempt failed: ${message}`);
+          console.error("Full error:", error);
+  
+          retries--;
+          if (retries === 0) {
+            console.warn(
+              `Failed to connect to Qdrant after multiple attempts: ${message}. Vector search will be unavailable.`
+            );
+            // Don't throw, just log warning
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2; // Exponential backoff
+        }
+      }
+    }
+
   
     private getVectorSizeForModel(model: string): number {
       // OpenAI models
@@ -162,61 +179,66 @@ export class QdrantPersistence {
       throw new Error(`Unknown vector size for model: ${model}. Please specify vector dimensions manually.`);
     }
   async initialize() {
-      await this.connect();
-  
-      if (!COLLECTION_NAME) {
-        throw new Error("COLLECTION_NAME environment variable is required");
-      }
-  
-      // Get vector size based on model
-      const requiredVectorSize = this.getVectorSizeForModel(FINAL_EMBEDDING_MODEL);
-  
-      try {
-        // Check if collection exists
-        const collections = await this.client.getCollections();
-        const collection = collections.collections.find(
-          (c) => c.name === COLLECTION_NAME
-        );
-  
-        if (!collection) {
-          await this.client.createCollection(COLLECTION_NAME, {
-            vectors: {
-              size: requiredVectorSize,
-              distance: "Cosine",
-            },
-            // Enable binary quantization for 40x performance boost with OpenAI embeddings
-            // NOTE: Temporarily disabled due to Qdrant server compatibility issues
-            // quantization_config: {
-            //   type: "binary",
-            //   always_ram: true,
-            // },
-          });
+        if (!this.client) {
+          console.warn("Warning: Qdrant client not initialized, skipping initialization");
           return;
         }
-  
-        // Get collection info to check vector size
-        const collectionInfo = (await this.client.getCollection(
-          COLLECTION_NAME
-        )) as QdrantCollectionInfo;
-        const currentVectorSize = collectionInfo.config?.params?.vectors?.size;
-  
-        if (!currentVectorSize) {
-          await this.recreateCollection(requiredVectorSize);
+        
+        await this.connect();
+    
+        if (!COLLECTION_NAME) {
+          console.warn("Warning: COLLECTION_NAME environment variable is required for Qdrant");
           return;
         }
-  
-        if (currentVectorSize !== requiredVectorSize) {
-          console.log(`Vector size mismatch: current=${currentVectorSize}, required=${requiredVectorSize}. Recreating collection for ${EMBEDDING_PROVIDER} ${FINAL_EMBEDDING_MODEL} embeddings.`);
-          await this.recreateCollection(requiredVectorSize);
+    
+        // Get vector size based on model
+        const requiredVectorSize = this.getVectorSizeForModel(FINAL_EMBEDDING_MODEL);
+    
+        try {
+          // Check if collection exists
+          const collections = await this.client.getCollections();
+          const collection = collections.collections.find(
+            (c) => c.name === COLLECTION_NAME
+          );
+    
+          if (!collection) {
+            await this.client.createCollection(COLLECTION_NAME, {
+              vectors: {
+                size: requiredVectorSize,
+                distance: "Cosine",
+              },
+              // Enable binary quantization for 40x performance boost with OpenAI embeddings
+              // NOTE: Temporarily disabled due to Qdrant server compatibility issues
+              // quantization_config: {
+              //   type: "binary",
+              //   always_ram: true,
+              // },
+            });
+            return;
+          }
+    
+          // Get collection info to check vector size
+          const collectionInfo = (await this.client.getCollection(
+            COLLECTION_NAME
+          )) as QdrantCollectionInfo;
+          const currentVectorSize = collectionInfo.config?.params?.vectors?.size;
+    
+          if (!currentVectorSize) {
+            await this.recreateCollection(requiredVectorSize);
+            return;
+          }
+    
+          if (currentVectorSize !== requiredVectorSize) {
+            console.log(`Vector size mismatch: current=${currentVectorSize}, required=${requiredVectorSize}. Recreating collection for ${EMBEDDING_PROVIDER} ${FINAL_EMBEDDING_MODEL} embeddings.`);
+            await this.recreateCollection(requiredVectorSize);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown Qdrant error";
+          console.error("Failed to initialize collection:", message);
+          console.warn("Continuing without Qdrant vector search functionality");
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown Qdrant error";
-        console.error("Failed to initialize collection:", message);
-        throw new Error(
-          `Failed to initialize Qdrant collection. Please check server logs for details: ${message}`
-        );
       }
-    }
+
 
 
 
@@ -284,6 +306,10 @@ export class QdrantPersistence {
   }
 
   async persistEntity(entity: Entity) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping entity persistence");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -336,6 +362,10 @@ export class QdrantPersistence {
   }
 
   async persistRelation(relation: Relation) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping relation persistence");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -381,7 +411,11 @@ export class QdrantPersistence {
     });
   }
 
-  async searchSimilar(query: string, limit: number = 10, scoreThreshold?: number) {
+  async searchSimilar(query: string, limit = 10, scoreThreshold?: number): Promise<Array<Entity | Relation>> {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, returning empty results");
+      return [];
+    }
       await this.connect();
       if (!COLLECTION_NAME) {
         throw new Error("COLLECTION_NAME environment variable is required");
@@ -418,6 +452,10 @@ export class QdrantPersistence {
 
 
   async deleteEntity(entityName: string) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping entity deletion");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -430,6 +468,10 @@ export class QdrantPersistence {
   }
 
   async deleteRelation(relation: Relation) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping relation deletion");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -445,6 +487,10 @@ export class QdrantPersistence {
 
   // Batch operations for meta-learning
   async batchPersistEntities(entities: Entity[]) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping batch entity persistence");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -493,6 +539,10 @@ export class QdrantPersistence {
   }
 
   async batchPersistRelations(relations: Relation[]) {
+    if (!this.client) {
+      console.warn("Qdrant client not initialized, skipping batch relation persistence");
+      return;
+    }
     await this.connect();
     if (!COLLECTION_NAME) {
       throw new Error("COLLECTION_NAME environment variable is required");
@@ -536,6 +586,10 @@ export class QdrantPersistence {
 
   // Enhanced search with filters
   async searchWithFilters(query: string, filters?: SearchFilters, limit: number = 10, scoreThreshold?: number) {
+      if (!this.client) {
+        console.warn("Qdrant client not initialized, returning empty results");
+        return [];
+      }
       await this.connect();
       if (!COLLECTION_NAME) {
         throw new Error("COLLECTION_NAME environment variable is required");

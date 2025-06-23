@@ -22,29 +22,24 @@ const FINAL_EMBEDDING_MODEL = EMBEDDING_MODEL || getDefaultModel(EMBEDDING_PROVI
 // Validate embedding provider configuration
 if (EMBEDDING_PROVIDER === "openai") {
   if (!OPENAI_API_KEY) {
-    console.error("Error: OPENAI_API_KEY environment variable is required when using OpenAI embeddings");
-    process.exit(1);
+    console.warn("Warning: OPENAI_API_KEY environment variable is missing when using OpenAI embeddings");
   }
 } else if (EMBEDDING_PROVIDER === "google") {
   if (!GOOGLE_API_KEY) {
-    console.error("Error: GOOGLE_API_KEY environment variable is required when using Google embeddings");
-    process.exit(1);
+    console.warn("Warning: GOOGLE_API_KEY environment variable is missing when using Google embeddings");
   }
 } else {
-  console.error("Error: EMBEDDING_PROVIDER must be either 'openai' or 'google'");
-  process.exit(1);
+  console.warn("Warning: EMBEDDING_PROVIDER must be either 'openai' or 'google'");
 }
 
 const QDRANT_URL = process.env.QDRANT_URL;
 if (!QDRANT_URL) {
-  console.error("Error: QDRANT_URL environment variable is required");
-  process.exit(1);
+  console.warn("Warning: QDRANT_URL environment variable is required");
 }
 
 const COLLECTION_NAME = process.env.QDRANT_COLLECTION_NAME;
 if (!COLLECTION_NAME) {
-  console.error("Error: QDRANT_COLLECTION_NAME environment variable is required");
-  process.exit(1);
+  console.warn("Warning: QDRANT_COLLECTION_NAME environment variable is required");
 }
 
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
@@ -65,15 +60,7 @@ if (PERSISTENCE_TYPE === "neo4j") {
   if (!NEO4J_PASSWORD) missingVars.push("NEO4J_PASSWORD");
   
   if (missingVars.length > 0) {
-    console.error(`Error: Missing required Neo4j environment variables: ${missingVars.join(", ")}`);
-    console.error("When using PERSISTENCE_TYPE=neo4j, you must provide:");
-    console.error("  NEO4J_URI=bolt://localhost:7687");
-    console.error("  NEO4J_USER=neo4j");
-    console.error("  NEO4J_PASSWORD=your-password");
-    console.error("  NEO4J_DATABASE=neo4j (optional)");
-    console.error("");
-    console.error("To use JSON persistence instead, set PERSISTENCE_TYPE=json or remove it entirely.");
-    process.exit(1);
+    console.warn(`Warning: Missing Neo4j environment variables: ${missingVars.join(", ")}. Falling back to JSON persistence.`);
   }
 }
 
