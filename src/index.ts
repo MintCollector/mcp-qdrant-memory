@@ -279,7 +279,7 @@ class MemoryServer {
         },
         {
           name: "semantic_search",
-          description: "Find semantically similar entities and relationships using AI embeddings. Returns results in two categories: 'search_results' (all types, limited) and optionally 'general_meta_learnings' (ordered by relevance). Input: {query: string, limit?: number, include_general_meta_learnings?: boolean}",
+          description: "Find semantically similar entities and relationships using AI embeddings. Returns results in two categories: 'search_results' (all types, limited) and optionally 'general_meta_learnings' (ordered by relevance to query). Input: {query: string, limit?: number, include_general_meta_learnings?: boolean}",
           inputSchema: {
             type: "object",
             properties: {
@@ -504,9 +504,10 @@ class MemoryServer {
               // If we have general meta-learnings, search them for relevance
               if (generalMetaLearnings.length > 0) {
                 // Use semantic search to order general meta-learnings by relevance
+                // Search for up to 15 most relevant
                 const generalSearchResults = await this.graphManager.searchSimilar(
                   query,
-                  generalMetaLearnings.length + 10 // Get extra to ensure we find all generals
+                  Math.max(15, generalMetaLearnings.length)
                 );
                 
                 // Filter to only include the general meta-learnings, maintaining order
